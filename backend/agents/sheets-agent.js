@@ -1,4 +1,4 @@
-import { BaseAgent } from './base-agent.js';
+﻿import { BaseAgent } from './base-agent.js';
 import { google } from 'googleapis';
 
 /**
@@ -13,7 +13,7 @@ export class GoogleSheetsAgent extends BaseAgent {
       ...config
     });
 
-    this.sheetsId = config.sheetsId;
+    this.sheetsId = config.sheetsId || process.env.GOOGLE_SHEETS_ID;
     this.initializeAuth(config);
   }
 
@@ -22,12 +22,14 @@ export class GoogleSheetsAgent extends BaseAgent {
    */
   async initializeAuth(config) {
     const auth = new google.auth.GoogleAuth({
-      keyFile: config.googleCredentials,
+      keyFile: config.googleCredentials || process.env.GOOGLE_APPLICATION_CREDENTIALS,
       scopes: ['https://www.googleapis.com/auth/spreadsheets']
     });
 
     this.authClient = await auth.getClient();
     this.sheets = google.sheets({ version: 'v4', auth: this.authClient });
+    
+    console.log('âœ… Google Sheets Agent: Authenticated');
   }
 
   /**
@@ -51,8 +53,8 @@ export class GoogleSheetsAgent extends BaseAgent {
         case 'Full group details':
           result = await this.writeGroupDetails(writeRequest.payload);
           break;
-        case 'Paul\'s group inventory':
-        case 'Jonathan\'s group inventory':
+        case "Paul's group inventory":
+        case "Jonathan's group inventory":
           result = await this.writeInventory(writeRequest.target_sheet, writeRequest.payload);
           break;
         default:
@@ -67,7 +69,7 @@ export class GoogleSheetsAgent extends BaseAgent {
         writeRequest: writeRequest.id,
         approval: approval.id,
         sheetId: this.sheetsId,
-        range: result.updatedRange,
+        range: result?.updatedRange,
         timestamp: new Date()
       };
 
@@ -169,17 +171,17 @@ export class GoogleSheetsAgent extends BaseAgent {
 
     // Write rows
     const rows = gameplayData.rows.map(row => [
-      row.Group,
-      row.Quantity,
-      row.Item,
-      row['Gold Value'],
-      row['Total Value'],
-      row['Distributed To'],
-      row['Sold To'],
-      row['Lesson Learns'],
-      row.Player,
-      row.Character,
-      row['Group (Paul\'s group or Jonathan\'s group)']
+      row.Group || 'Unknown',
+      row.Quantity || 1,
+      row.Item || '',
+      row['Gold Value'] || 0,
+      row['Total Value'] || 0,
+      row['Distributed To'] || 'Party',
+      row['Sold To'] || '',
+      row['Lesson Learns'] || '',
+      row.Player || '',
+      row.Character || '',
+      row['Group (Paul\'s group or Jonathan\'s group)'] || 'Unknown'
     ]);
 
     const result = await this.sheets.spreadsheets.values.append({
@@ -249,46 +251,7 @@ export class GoogleSheetsAgent extends BaseAgent {
       resource: { values: [headers] }
     });
 
-    // Format headers
-    await this.sheets.spreadsheets.batchUpdate({
-      spreadsheetId: this.sheetsId,
-      resource: {
-        requests: [{
-          repeatCell: {
-            range: {
-              sheetId: await this.getSheetId(sheetName),
-              startRowIndex: 0,
-              endRowIndex: 1
-            },
-            cell: {
-              userEnteredFormat: {
-                backgroundColor: { red: 0.2, green: 0.2, blue: 0.2 },
-                textFormat: {
-                  foregroundColor: { red: 1, green: 1, blue: 1 },
-                  bold: true
-                }
-              }
-            },
-            fields: 'userEnteredFormat(backgroundColor,textFormat)'
-          }
-        }]
-      }
-    });
-  }
-
-  /**
-   * Get sheet ID by name
-   */
-  async getSheetId(sheetName) {
-    const response = await this.sheets.spreadsheets.get({
-      spreadsheetId: this.sheetsId
-    });
-
-    const sheet = response.data.sheets.find(s =>
-      s.properties.title === sheetName
-    );
-
-    return sheet?.properties.sheetId;
+    console.log(`âœ… Created gameplay sheet: ${sheetName}`);
   }
 
   /**
@@ -296,23 +259,17 @@ export class GoogleSheetsAgent extends BaseAgent {
    */
   async createWriteRequest(targetSheet, payload, createdBy) {
     const writeRequest = {
-      id: this.generateId(),
+      id: `wr_${Date.now()}_${Math.random().toString(36).substring(7)}`,
       target_sheet: targetSheet,
       payload,
       created_by: createdBy,
       created_ts: new Date(),
       approved_by_dm: null,
-      approval_ts: null
+      approval_ts: null,
+      status: 'pending'
     };
 
     this.emit('writeRequestCreated', writeRequest);
     return writeRequest;
-  }
-
-  /**
-   * Generate unique ID
-   */
-  generateId() {
-    return `wr_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   }
 }

@@ -1,4 +1,4 @@
-import { BaseAgent } from './base-agent.js';
+﻿import { BaseAgent } from './base-agent.js';
 import mongoose from 'mongoose';
 
 /**
@@ -22,17 +22,27 @@ export class StateManagerAgent extends BaseAgent {
    */
   async initializeDatabase(uri) {
     try {
-      await mongoose.connect(uri);
-      console.log('Connected to MongoDB');
+      if (mongoose.connection.readyState === 0) {
+        await mongoose.connect(uri);
+        console.log('âœ… State Manager: MongoDB connected');
+      }
     } catch (error) {
-      console.error('MongoDB connection error:', error);
+      console.error('âŒ State Manager: MongoDB connection error:', error);
     }
   }
 
   /**
-   * Define Mongoose schemas
+   * Define Mongoose schemas (only if not already defined)
    */
   defineSchemas() {
+    // Check if models already exist
+    if (mongoose.models.Session) {
+      this.Session = mongoose.models.Session;
+      this.Player = mongoose.models.Player;
+      this.WriteRequest = mongoose.models.WriteRequest;
+      return;
+    }
+
     // Session Schema
     const sessionSchema = new mongoose.Schema({
       id: { type: String, required: true, unique: true },
@@ -78,35 +88,10 @@ export class StateManagerAgent extends BaseAgent {
       rejection_reason: String
     }, { timestamps: true });
 
-    // Approval Schema
-    const approvalSchema = new mongoose.Schema({
-      id: { type: String, required: true, unique: true },
-      request_id: String,
-      dm_id: String,
-      decision: { type: String, enum: ['approve', 'reject'] },
-      comment: String,
-      ts: Date
-    }, { timestamps: true });
-
-    // Event Queue Schema (for retries and async processing)
-    const eventQueueSchema = new mongoose.Schema({
-      id: { type: String, required: true, unique: true },
-      event_type: String,
-      payload: mongoose.Schema.Types.Mixed,
-      status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'] },
-      retry_count: { type: Number, default: 0 },
-      max_retries: { type: Number, default: 3 },
-      error_message: String,
-      scheduled_at: Date,
-      processed_at: Date
-    }, { timestamps: true });
-
     // Create models
     this.Session = mongoose.model('Session', sessionSchema);
     this.Player = mongoose.model('Player', playerSchema);
     this.WriteRequest = mongoose.model('WriteRequest', writeRequestSchema);
-    this.Approval = mongoose.model('Approval', approvalSchema);
-    this.EventQueue = mongoose.model('EventQueue', eventQueueSchema);
   }
 
   /**
@@ -251,23 +236,35 @@ export class StateManagerAgent extends BaseAgent {
   async getPendingWriteRequests() {
     return await this.WriteRequest.find({ status: 'pending' }).sort({ created_ts: 1 });
   }
-
-  /**
-   * Save approval
-   */
   async saveApproval(approvalData) {
     try {
+      // Define approval schema if not exists
+      if (!mongoose.models.Approval) {
+        const approvalSchema = new mongoose.Schema({
+          id: { type: String, required: true, unique: true },
+          request_id: String,
+          dm_id: String,
+          decision: { type: String, enum: ['approve', 'reject'] },
+          comment: String,
+          ts: Date
+        }, { timestamps: true });
+        
+        this.Approval = mongoose.model('Approval', approvalSchema);
+      } else {
+        this.Approval = mongoose.models.Approval;
+      }
+
       const approval = new this.Approval(approvalData);
       await approval.save();
 
-      // Update write request
+      // Update write request status
       await this.WriteRequest.findOneAndUpdate(
         { id: approvalData.request_id },
         {
           status: approvalData.decision === 'approve' ? 'approved' : 'rejected',
           approved_by_dm: approvalData.dm_id,
           approval_ts: approvalData.ts,
-          rejection_reason: approvalData.comment
+          rejection_reason: approvalData.decision === 'reject' ? approvalData.comment : null
         }
       );
 
@@ -278,78 +275,5 @@ export class StateManagerAgent extends BaseAgent {
       this.handleError(error, { approvalId: approvalData.id });
       throw error;
     }
-  }
-
-  /**
-   * Queue event for async processing
-   */
-  async queueEvent(eventType, payload, scheduledAt = new Date()) {
-    const event = new this.EventQueue({
-      id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      event_type: eventType,
-      payload,
-      status: 'pending',
-      scheduled_at: scheduledAt
-    });
-
-    await event.save();
-    this.emit('eventQueued', event);
-    return event;
-  }
-
-  /**
-   * Process queued events
-   */
-  async processQueuedEvents() {
-    const events = await this.EventQueue.find({
-      status: 'pending',
-      scheduled_at: { $lte: new Date() },
-      retry_count: { $lt: mongoose.Schema.Types.Mixed.max_retries }
-    }).limit(10);
-
-    for (const event of events) {
-      try {
-        await this.EventQueue.findByIdAndUpdate(event._id, {
-          status: 'processing'
-        });
-
-        // Emit for external processing
-        this.emit('processEvent', event);
-
-      } catch (error) {
-        await this.EventQueue.findByIdAndUpdate(event._id, {
-          status: 'failed',
-          error_message: error.message,
-          retry_count: event.retry_count + 1
-        });
-      }
-    }
-  }
-
-  /**
-   * Mark event as completed
-   */
-  async completeEvent(eventId) {
-    await this.EventQueue.findOneAndUpdate(
-      { id: eventId },
-      { status: 'completed', processed_at: new Date() }
-    );
-  }
-
-  /**
-   * Get session statistics
-   */
-  async getSessionStats() {
-    const totalSessions = await this.Session.countDocuments();
-    const completedSessions = await this.Session.countDocuments({ status: 'completed' });
-    const totalPlayers = await this.Player.countDocuments();
-    const pendingApprovals = await this.WriteRequest.countDocuments({ status: 'pending' });
-
-    return {
-      totalSessions,
-      completedSessions,
-      totalPlayers,
-      pendingApprovals
-    };
   }
 }

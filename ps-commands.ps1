@@ -1,4 +1,5 @@
-﻿import { BaseAgent } from './base-agent.js';
+@'
+import { BaseAgent } from './base-agent.js';
 import speech from '@google-cloud/speech';
 import fs from 'fs';
 
@@ -15,7 +16,7 @@ export class TranscriptionAgent extends BaseAgent {
       keyFilename: config.googleCredentials || process.env.GOOGLE_APPLICATION_CREDENTIALS
     });
 
-    console.log('âœ… Transcription Agent: Authenticated');
+    console.log('✅ Transcription Agent: Authenticated');
   }
 
   async execute(input) {
@@ -48,12 +49,12 @@ export class TranscriptionAgent extends BaseAgent {
 
   async transcribeAudio(audioPath) {
     const stats = fs.statSync(audioPath);
-    console.log(`  ðŸ“ File size: ${(stats.size / 1024).toFixed(2)} KB`);
+    console.log(`  📁 File size: ${(stats.size / 1024).toFixed(2)} KB`);
 
     const buffer = fs.readFileSync(audioPath);
     const audioInfo = this.detectAudioFormat(buffer);
     
-    console.log(`  ðŸŽµ Detected: ${audioInfo.sampleRate}Hz, ${audioInfo.channels} channel(s)`);
+    console.log(`  🎵 Detected: ${audioInfo.sampleRate}Hz, ${audioInfo.channels} channel(s)`);
 
     const audioBytes = buffer.toString('base64');
 
@@ -76,7 +77,7 @@ export class TranscriptionAgent extends BaseAgent {
     };
 
     if (audioInfo.channels > 1) {
-      console.log('  âš ï¸  Stereo audio detected - speaker diarization disabled');
+      console.log('  ⚠️  Stereo audio detected - speaker diarization disabled');
       console.log('     For best results, convert to mono');
     }
 
@@ -85,15 +86,15 @@ export class TranscriptionAgent extends BaseAgent {
       config: config,
     };
 
-    console.log('  ðŸŽ¤ Sending to Google Speech-to-Text...');
+    console.log('  🎤 Sending to Google Speech-to-Text...');
     
     try {
       const [response] = await this.speechClient.recognize(request);
       
-      console.log('  âœ… Response received');
+      console.log('  ✅ Response received');
 
       if (!response.results || response.results.length === 0) {
-        console.log('  âš ï¸  No speech detected');
+        console.log('  ⚠️  No speech detected');
         return {
           text: '',
           segments: [],
@@ -105,7 +106,7 @@ export class TranscriptionAgent extends BaseAgent {
 
       return this.processDiarizedTranscript(response);
     } catch (error) {
-      console.error('  âŒ Google API Error:', error.message);
+      console.error('  ❌ Google API Error:', error.message);
       throw error;
     }
   }
@@ -174,3 +175,4 @@ export class TranscriptionAgent extends BaseAgent {
     return (time.seconds || 0) + (time.nanos || 0) / 1e9;
   }
 }
+'@ | Out-File -Encoding UTF8 backend/agents/transcription-agent.js

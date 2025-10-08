@@ -1,4 +1,4 @@
-import { BaseAgent } from './base-agent.js';
+﻿import { BaseAgent } from './base-agent.js';
 
 /**
  * EventExtractionAgent - NLU-based game event detection and tagging
@@ -27,7 +27,7 @@ export class EventExtractionAgent extends BaseAgent {
       'shopping'
     ];
 
-    this.players = config.players || []; // {id, real_name, in_game_name}
+    this.players = config.players || [];
   }
 
   /**
@@ -42,23 +42,29 @@ export class EventExtractionAgent extends BaseAgent {
     try {
       const events = [];
 
-      // Process each transcript segment
-      for (const segment of transcript.segments) {
-        const extractedEvents = await this.extractEventsFromSegment(segment, sessionId);
-        events.push(...extractedEvents);
+      // Handle both string and object transcript formats
+      let transcriptText = '';
+      if (typeof transcript === 'string') {
+        transcriptText = transcript;
+      } else if (transcript.text) {
+        transcriptText = transcript.text;
+      } else if (transcript.segments && Array.isArray(transcript.segments)) {
+        transcriptText = transcript.segments.map(s => s.text).join(' ');
+      } else {
+        throw new Error('Invalid transcript format');
       }
+
+      // Extract events from text
+      const extractedEvents = await this.extractEventsFromText(transcriptText, sessionId);
+      events.push(...extractedEvents);
 
       // Tag personal events
       const taggedEvents = this.tagPersonalEvents(events);
-
-      // Infer inventory changes
-      const inventoryChanges = this.inferInventoryChanges(events);
 
       const result = {
         sessionId,
         chunkIndex,
         events: taggedEvents,
-        inventoryChanges,
         timestamp: new Date()
       };
 
@@ -74,10 +80,10 @@ export class EventExtractionAgent extends BaseAgent {
   }
 
   /**
-   * Extract events from a single transcript segment using Claude
+   * Extract events from transcript text using Claude
    */
-  async extractEventsFromSegment(segment, sessionId) {
-    const prompt = this.buildExtractionPrompt(segment);
+  async extractEventsFromText(transcriptText, sessionId) {
+    const prompt = this.buildExtractionPrompt(transcriptText);
 
     const response = await this.callClaude([
       {
@@ -94,21 +100,19 @@ export class EventExtractionAgent extends BaseAgent {
     return extractedData.events.map(event => ({
       ...event,
       sessionId,
-      speaker: segment.speaker,
-      timestamp: segment.startTime,
-      sourceText: segment.text,
-      confidence: segment.confidence
+      timestamp: new Date(),
+      sourceText: transcriptText.substring(0, 200), // First 200 chars for reference
+      id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     }));
   }
 
   /**
    * Build extraction prompt for Claude
    */
-  buildExtractionPrompt(segment) {
-    return `You are analyzing a D&D game session transcript. Extract all game-relevant events from the following segment.
+  buildExtractionPrompt(transcriptText) {
+    return `You are analyzing a D&D game session transcript. Extract all game-relevant events.
 
-Speaker: ${segment.speaker}
-Text: "${segment.text}"
+Transcript: "${transcriptText}"
 
 Event Types to detect:
 - combat (attacks, damage, initiative, etc.)
@@ -124,7 +128,7 @@ Event Types to detect:
 - shopping (visiting merchants, browsing items)
 
 Known Players:
-${this.players.map(p => `- ${p.in_game_name} (player: ${p.real_name})`).join('\n')}
+${this.players.map(p => `- ${p.in_game_name} (player: ${p.real_name})`).join('\n') || '- No players registered yet'}
 
 Return a JSON object with this structure:
 {
@@ -138,10 +142,7 @@ Return a JSON object with this structure:
         "damage": number (if combat),
         "gold_value": number (if loot/transaction),
         "item_name": string (if item-related),
-        "quantity": number (if applicable),
-        "skill": string (if skill check),
-        "dc": number (if skill check),
-        "result": string (success/failure if applicable)
+        "quantity": number (if applicable)
       }
     }
   ]
@@ -156,7 +157,6 @@ Only return the JSON, no other text.`;
    */
   parseClaudeResponse(text) {
     try {
-      // Extract JSON from response (handle markdown code blocks)
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
@@ -184,14 +184,16 @@ Only return the JSON, no other text.`;
       }
 
       // Check entities for player mentions
-      event.entities?.forEach(entity => {
-        const mentionedPlayer = this.players.find(p =>
-          p.in_game_name.toLowerCase() === entity.toLowerCase()
-        );
-        if (mentionedPlayer && !personalFor.includes(mentionedPlayer.id)) {
-          personalFor.push(mentionedPlayer.id);
-        }
-      });
+      if (event.entities && Array.isArray(event.entities)) {
+        event.entities.forEach(entity => {
+          const mentionedPlayer = this.players.find(p =>
+            p.in_game_name.toLowerCase() === entity.toLowerCase()
+          );
+          if (mentionedPlayer && !personalFor.includes(mentionedPlayer.id)) {
+            personalFor.push(mentionedPlayer.id);
+          }
+        });
+      }
 
       return {
         ...event,
@@ -203,56 +205,10 @@ Only return the JSON, no other text.`;
   }
 
   /**
-   * Infer inventory changes from transaction/loot events
-   */
-  inferInventoryChanges(events) {
-    const inventoryChanges = [];
-
-    events.forEach(event => {
-      if (event.type === 'transaction' || event.type === 'loot' || event.type === 'shopping') {
-        const change = {
-          eventId: event.id,
-          playerId: event.personalFor?.[0] || 'group',
-          itemName: event.metadata?.item_name,
-          quantity: event.metadata?.quantity || 1,
-          cost: event.metadata?.gold_value || 0,
-          type: event.type === 'transaction' ? 'purchase' : 'acquired',
-          timestamp: event.timestamp
-        };
-
-        if (change.itemName) {
-          inventoryChanges.push(change);
-        }
-      }
-    });
-
-    return inventoryChanges;
-  }
-
-  /**
    * Update player list for entity recognition
    */
   updatePlayers(players) {
     this.players = players;
     this.log('info', `Updated player list: ${players.length} players`);
-  }
-
-  /**
-   * Real-time event streaming for ongoing sessions
-   */
-  async streamEvents(transcriptStream) {
-    transcriptStream.on('data', async (segment) => {
-      try {
-        const events = await this.extractEventsFromSegment(segment, segment.sessionId);
-        const taggedEvents = this.tagPersonalEvents(events);
-
-        this.emit('realtimeEvents', {
-          events: taggedEvents,
-          timestamp: new Date()
-        });
-      } catch (error) {
-        this.handleError(error);
-      }
-    });
   }
 }

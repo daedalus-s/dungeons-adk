@@ -1,15 +1,15 @@
-import express from 'express';
+﻿import express from 'express';
 import { WebSocketServer } from 'ws';
 import multer from 'multer';
-import dotenv from 'dotenv';
-import { orchestrator } from './agents/orchestrator.js';
-
-dotenv.config();
+import cors from 'cors';
+import { AgentOrchestrator } from './agents/orchestrator.js';
+import { config } from '../config.js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.port || 3000;
 
 // Middleware
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -27,18 +27,26 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
 });
 
+// Initialize orchestrator
+const orchestrator = new AgentOrchestrator({
+  anthropicApiKey: config.anthropicApiKey,
+  mongoUri: config.mongodbUri,
+  googleCredentials: config.googleApplicationCredentials,
+  sheetsId: config.googleSheetsId
+});
+
 // WebSocket server for real-time updates
 const wss = new WebSocketServer({ noServer: true });
 
 wss.on('connection', (ws) => {
-  console.log('Client connected');
+  console.log('ðŸ“± Client connected');
 
   ws.on('message', (message) => {
     console.log('Received:', message.toString());
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
+    console.log('ðŸ“± Client disconnected');
   });
 });
 
@@ -52,15 +60,28 @@ const broadcast = (data) => {
 };
 
 // Agent event listeners
-orchestrator.on('workflowStarted', (data) => broadcast({ type: 'workflow:started', data }));
-orchestrator.on('workflowCompleted', (data) => broadcast({ type: 'workflow:completed', data }));
-orchestrator.on('agentStateChange', (data) => broadcast({ type: 'agent:state', data }));
+orchestrator.on('agentStateChange', (data) => {
+  console.log(`[Agent] ${data.agent}: ${data.previousState} â†’ ${data.newState}`);
+  broadcast({ type: 'agent:state', data });
+});
 
-// ===== API ROUTES =====
+orchestrator.on('agentLog', (data) => {
+  console.log(`[${data.agent}] ${data.message}`);
+});
+
+orchestrator.on('agentError', (data) => {
+  console.error(`[Error] ${data.agent}:`, data.error.message);
+});
+
+// ===== ROUTES =====
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date() });
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date(),
+    uptime: process.uptime()
+  });
 });
 
 // Agent health
@@ -75,7 +96,7 @@ app.get('/api/agents/health', async (req, res) => {
 
 // ===== SESSION ROUTES =====
 
-// Start new session
+// Create new session
 app.post('/api/sessions', async (req, res) => {
   try {
     const { players, dm_id } = req.body;
@@ -94,35 +115,149 @@ app.post('/api/sessions', async (req, res) => {
       metadata: { dm_id, players }
     });
 
-    res.json({ sessionId, session });
+    broadcast({ type: 'session:created', data: { sessionId } });
+
+    res.json({ 
+      sessionId, 
+      session: {
+        id: session.id,
+        status: session.status,
+        start_ts: session.start_ts
+      }
+    });
   } catch (error) {
+    console.error('Error creating session:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Upload audio chunk (simulated - for testing without actual audio)
 // Upload audio chunk
 app.post('/api/sessions/:sessionId/audio', upload.single('audio'), async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { chunkIndex } = req.body;
-    const audioUri = `/uploads/${req.file.filename}`;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file uploaded' });
+    }
+
+    const audioUri = req.file.path;
+
+    console.log(`📁 Audio uploaded: ${audioUri} (${req.file.size} bytes)`);
 
     // Update session with audio location
     const stateManager = orchestrator.getAgent('state-manager');
-    await stateManager.updateSession(sessionId, {
-      $push: { audio_locations: audioUri }
-    });
+    const session = await stateManager.getSession(sessionId);
+    session.audio_locations.push(audioUri);
+    await stateManager.saveSession(session);
 
-    // Trigger transcription
+    // Transcribe the audio
+    console.log('🎙️ Starting transcription...');
     const transcriptionAgent = orchestrator.getAgent('transcription');
+    
     const transcript = await transcriptionAgent.execute({
-      audioUri: req.file.path,
+      audioUri,
       sessionId,
       chunkIndex: parseInt(chunkIndex)
     });
 
-    res.json({ audioUri, transcript });
+    console.log(`✅ Transcribed ${transcript.wordCount} words`);
+
+    // Extract events from transcript
+    const stateManager2 = orchestrator.getAgent('state-manager');
+    const allPlayers = await stateManager2.getAllPlayers();
+    const sessionPlayers = allPlayers.filter(p => 
+      session.metadata?.players?.includes(p.id)
+    );
+
+    const eventAgent = orchestrator.getAgent('event-extraction');
+    eventAgent.updatePlayers(sessionPlayers);
+
+    const eventData = await eventAgent.execute({
+      transcript,
+      sessionId,
+      chunkIndex: parseInt(chunkIndex)
+    });
+
+    // Save events to session
+    session.event_list.push(...eventData.events);
+    await stateManager2.saveSession(session);
+
+    // Broadcast to connected clients
+    broadcast({ 
+      type: 'audio:transcribed', 
+      data: { 
+        sessionId, 
+        chunkIndex, 
+        transcript: transcript.text,
+        events: eventData.events 
+      } 
+    });
+
+    res.json({ 
+      audioUri, 
+      chunkIndex,
+      transcript: {
+        text: transcript.text,
+        wordCount: transcript.wordCount,
+        speakerCount: transcript.segments?.length || 0
+      },
+      events: eventData.events,
+      eventCount: eventData.events.length
+    });
   } catch (error) {
+    console.error('Error processing audio:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Process transcript text (for testing)
+app.post('/api/sessions/:sessionId/transcript', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const stateManager = orchestrator.getAgent('state-manager');
+    const session = await stateManager.getSession(sessionId);
+    
+    // Get players
+    const allPlayers = await stateManager.getAllPlayers();
+    const sessionPlayers = allPlayers.filter(p => 
+      session.metadata?.players?.includes(p.id)
+    );
+
+    // Update event extraction agent with players
+    const eventAgent = orchestrator.getAgent('event-extraction');
+    eventAgent.updatePlayers(sessionPlayers);
+
+    // Extract events
+    const eventData = await orchestrator.executeAgent('event-extraction', {
+      transcript: text,
+      sessionId,
+      chunkIndex: 0
+    });
+
+    // Update session
+    session.event_list.push(...eventData.events);
+    await stateManager.saveSession(session);
+
+    broadcast({ 
+      type: 'events:extracted', 
+      data: { sessionId, events: eventData.events } 
+    });
+
+    res.json({
+      sessionId,
+      events: eventData.events,
+      eventCount: eventData.events.length
+    });
+  } catch (error) {
+    console.error('Error processing transcript:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -136,26 +271,36 @@ app.post('/api/sessions/:sessionId/end', async (req, res) => {
     const session = await stateManager.getSession(sessionId);
 
     // Get players
-    const players = await stateManager.getAllPlayers();
+    const allPlayers = await stateManager.getAllPlayers();
+    const sessionPlayers = allPlayers.filter(p => 
+      session.metadata?.players?.includes(p.id)
+    );
 
-    // Process session
-    const results = await orchestrator.processSession({
+    // Generate summaries
+    console.log(`Generating summaries for session ${sessionId}...`);
+    const summaries = await orchestrator.executeAgent('summarizer', {
       sessionId,
-      audioChunks: session.audio_locations.map((uri, i) => ({ uri, index: i })),
-      players
+      events: session.event_list || [],
+      players: sessionPlayers
     });
 
     // Update session
     await stateManager.updateSession(sessionId, {
       status: 'completed',
       end_ts: new Date(),
-      event_list: results.events,
-      transcripts: results.transcripts,
-      summaries: results.summaries
+      summaries: summaries
     });
 
-    res.json(results);
+    broadcast({ type: 'session:completed', data: { sessionId } });
+
+    res.json({
+      sessionId,
+      status: 'completed',
+      events: session.event_list,
+      summaries
+    });
   } catch (error) {
+    console.error('Error ending session:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -166,9 +311,37 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const stateManager = orchestrator.getAgent('state-manager');
     const session = await stateManager.getSession(sessionId);
-    res.json(session);
+    
+    res.json({
+      id: session.id,
+      status: session.status,
+      start_ts: session.start_ts,
+      end_ts: session.end_ts,
+      event_count: session.event_list?.length || 0,
+      has_summaries: !!session.summaries
+    });
   } catch (error) {
     res.status(404).json({ error: error.message });
+  }
+});
+
+// Get all sessions
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const stateManager = orchestrator.getAgent('state-manager');
+    const sessions = await stateManager.Session.find()
+      .sort({ start_ts: -1 })
+      .limit(50);
+    
+    res.json(sessions.map(s => ({
+      id: s.id,
+      status: s.status,
+      start_ts: s.start_ts,
+      end_ts: s.end_ts,
+      event_count: s.event_list?.length || 0
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -186,59 +359,16 @@ app.post('/api/players', async (req, res) => {
     const stateManager = orchestrator.getAgent('state-manager');
     const player = await stateManager.savePlayer(playerData);
 
-    res.json(player);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// OCR stat sheet
-app.post('/api/players/:playerId/stat-sheet', upload.single('image'), async (req, res) => {
-  try {
-    const { playerId } = req.params;
-    const imageUri = req.file.path;
-
-    const ocrAgent = orchestrator.getAgent('ocr');
-    const result = await ocrAgent.execute({ imageUri, playerId });
-
-    // Save to player
-    const stateManager = orchestrator.getAgent('state-manager');
-    await stateManager.savePlayer({
-      id: playerId,
-      stat_sheet_data: result.parsedFields
+    res.json({
+      id: player.id,
+      real_name: player.real_name,
+      in_game_name: player.in_game_name,
+      race: player.race,
+      role_type: player.role_type,
+      level: player.level
     });
-
-    res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Generate persona
-app.post('/api/players/:playerId/persona', upload.single('image'), async (req, res) => {
-  try {
-    const { playerId } = req.params;
-    const { characterName, userPrompt } = req.body;
-    const imageUri = req.file.path;
-
-    const personaAgent = orchestrator.getAgent('persona');
-    const result = await personaAgent.execute({
-      imageUri,
-      playerId,
-      characterName,
-      userPrompt
-    });
-
-    // Save to player
-    const stateManager = orchestrator.getAgent('state-manager');
-    await stateManager.savePlayer({
-      id: playerId,
-      persona_data: result.personaDescriptors,
-      persona_image_id: result.avatarUri
-    });
-
-    res.json(result);
-  } catch (error) {
+    console.error('Error creating player:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -255,6 +385,24 @@ app.get('/api/players/:playerId', async (req, res) => {
   }
 });
 
+// Get all players
+app.get('/api/players', async (req, res) => {
+  try {
+    const stateManager = orchestrator.getAgent('state-manager');
+    const players = await stateManager.getAllPlayers();
+    res.json(players.map(p => ({
+      id: p.id,
+      real_name: p.real_name,
+      in_game_name: p.in_game_name,
+      race: p.race,
+      role_type: p.role_type,
+      level: p.level,
+      group: p.group
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 // ===== APPROVAL ROUTES =====
 
 // Get pending write requests
@@ -290,50 +438,68 @@ app.post('/api/approvals/:requestId', async (req, res) => {
     // If approved, execute write
     if (decision === 'approve') {
       const writeRequest = await stateManager.WriteRequest.findOne({ id: requestId });
-      const result = await orchestrator.processApprovedWrite(writeRequest, approval);
-      res.json({ approval, writeResult: result });
+      
+      // Execute the write via sheets agent
+      const sheetsAgent = orchestrator.getAgent('sheets');
+      if (sheetsAgent) {
+        const result = await sheetsAgent.execute({ writeRequest, approval });
+        broadcast({ type: 'approval:executed', data: { requestId, result } });
+        res.json({ approval, writeResult: result });
+      } else {
+        res.json({ approval, message: 'Approved (sheets agent not configured)' });
+      }
     } else {
       res.json({ approval, message: 'Request rejected' });
     }
   } catch (error) {
+    console.error('Error processing approval:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ===== GROUPME ROUTES =====
-
-// Link player to GroupMe
-app.post('/api/groupme/link', async (req, res) => {
+// Create write request manually (for testing)
+app.post('/api/write-requests', async (req, res) => {
   try {
-    const { playerId, groupmeUserId } = req.body;
+    const { target_sheet, payload, session_id } = req.body;
 
-    const groupmeAgent = orchestrator.getAgent('groupme');
-    await groupmeAgent.linkPlayerToGroupMe(playerId, groupmeUserId);
+    const sheetsAgent = orchestrator.getAgent('sheets');
+    const writeRequest = await sheetsAgent.createWriteRequest(
+      target_sheet,
+      payload,
+      session_id
+    );
 
-    res.json({ success: true });
+    const stateManager = orchestrator.getAgent('state-manager');
+    await stateManager.saveWriteRequest(writeRequest);
+
+    broadcast({ type: 'writeRequest:created', data: writeRequest });
+
+    res.json(writeRequest);
   } catch (error) {
+    console.error('Error creating write request:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
-// Get GroupMe members
-app.get('/api/groupme/members', async (req, res) => {
-  try {
-    const groupmeAgent = orchestrator.getAgent('groupme');
-    const members = await groupmeAgent.getGroupMembers();
-    res.json(members);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // ===== STATISTICS =====
 
 app.get('/api/stats', async (req, res) => {
   try {
     const stateManager = orchestrator.getAgent('state-manager');
-    const stats = await stateManager.getSessionStats();
-    res.json(stats);
+    
+    const totalSessions = await stateManager.Session.countDocuments();
+    const completedSessions = await stateManager.Session.countDocuments({ status: 'completed' });
+    const totalPlayers = await stateManager.Player.countDocuments();
+    const totalEvents = await stateManager.Session.aggregate([
+      { $project: { eventCount: { $size: { $ifNull: ['$event_list', []] } } } },
+      { $group: { _id: null, total: { $sum: '$eventCount' } } }
+    ]);
+
+    res.json({
+      totalSessions,
+      completedSessions,
+      totalPlayers,
+      totalEvents: totalEvents[0]?.total || 0
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -342,14 +508,26 @@ app.get('/api/stats', async (req, res) => {
 // ===== START SERVER =====
 
 const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`WebSocket available for real-time updates`);
+  console.log(`\nðŸš€ Dungeons ADK Server`);
+  console.log(`ðŸ“¡ API: http://localhost:${PORT}`);
+  console.log(`ðŸ”Œ WebSocket: ws://localhost:${PORT}`);
+  console.log(`ðŸ“Š Health: http://localhost:${PORT}/health`);
+  console.log(`\nâœ¨ Ready to process D&D sessions!\n`);
 });
 
 // WebSocket upgrade
 server.on('upgrade', (request, socket, head) => {
   wss.handleUpgrade(request, socket, head, (ws) => {
     wss.emit('connection', ws, request);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
   });
 });
 
