@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:7
+    container_name: dungeons-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+    networks:
+      - dungeons-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: dungeons-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - dungeons-network
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: dungeons-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:password123@mongodb:27017/dungeons-adk?authSource=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env
+    depends_on:
+      - mongodb
+      - redis
+    volumes:
+      - ./uploads:/app/uploads
+      - ./config:/app/config
+    networks:
+      - dungeons-network
+
+  # MCP Transcription Server
+  mcp-transcription:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-transcription
+    container_name: mcp-transcription
+    ports:
+      - "4001:4001"
+    environment:
+      - MCP_TRANSCRIPTION_PORT=4001
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - dungeons-network
+
+  # MCP Vision Server
+  mcp-vision:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-vision
+    container_name: mcp-vision
+    ports:
+      - "4002:4002"
+    environment:
+      - MCP_VISION_PORT=4002
+    env_file:
+      - .env
+    networks:
+      - dungeons-network
+
+  # MCP OCR Server
+  mcp-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-ocr
+    container_name: mcp-ocr
+    ports:
+      - "4003:4003"
+    environment:
+      - MCP_OCR_PORT=4003
+    env_file:
+      - .env
+    networks:
+      - dungeons-network
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  dungeons-network:
+    driver: bridge
