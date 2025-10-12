@@ -1,0 +1,26 @@
+{
+    "version": "1.0.0",
+    "name": "dungeons-adk-frontend",
+    "scripts": {
+        "preview": "vite preview",
+        "build": "vite build",
+        "dev": "vite"
+    },
+    "devDependencies": {
+        "@vitejs/plugin-react": "^4.7.0",
+        "vite": "^5.4.20"
+    },
+    "dependencies": {
+        "@emotion/react": "^11.14.0",
+        "@emotion/styled": "^11.14.1",
+        "@mui/icons-material": "^5.18.0",
+        "@mui/material": "^5.18.0",
+        "axios": "^1.12.2",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-router-dom": "^6.30.1",
+        "recharts": "^2.15.4",
+        "zustand": "^4.5.7"
+    },
+    "private": true
+}

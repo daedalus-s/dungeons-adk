@@ -1,518 +1,438 @@
-# Dungeons ADK - Complete Implementation Guide
+# 🌐 Dungeons ADK - Web Application Setup Guide
 
-## 🎯 Groundbreaking Solution Overview
+Complete guide to restructure and run your D&D session recorder as a modern web application.
 
-This is a **revolutionary multi-agent D&D session management system** that combines:
-- **Google ADK** for agent orchestration
-- **Claude Code** for intelligent NLU and summarization
-- **React Native** for cross-platform mobile experience
-- **Real-time processing** with chunked audio transcription
-- **Approval-gated data sync** to Google Sheets
-- **Automated GroupMe messaging** with group and personal summaries
+---
 
-### Key Innovations
+## 🎯 Why Web Over Mobile?
 
-1. **Multi-Agent Architecture**: 11 specialized agents working in coordinated workflows
-2. **Real-time Event Extraction**: Live D&D event detection during gameplay
-3. **DM Approval Gate**: All data writes require explicit DM authorization
-4. **Privacy-First Design**: PII scrubbing, consent management, data retention policies
-5. **MCP Server Routing**: Intelligent load balancing across processing servers
-6. **Vision-Based Character Creation**: Persona and avatar generation from images
-7. **OCR Stat Sheet Digitization**: Automatic character sheet parsing
+✅ **No Expo SDK 54 audio bugs**  
+✅ **Works on ALL devices** (desktop, laptop, tablet, phone browsers)  
+✅ **Mature Web Audio API** (MediaRecorder is stable)  
+✅ **Easier deployment** (single URL, no app stores)  
+✅ **Better debugging** (browser DevTools)  
+✅ **Instant updates** (no app store approval)
 
-## 🏗️ System Architecture
+---
 
-### Agent Ecosystem
+## 📋 Prerequisites
 
-```
-┌─────────────────────────────────────────────────┐
-│           Agent Orchestrator (ADK)              │
-│  - Workflow Management                          │
-│  - Inter-agent Communication                    │
-│  - State Coordination                           │
-└─────────────────────────────────────────────────┘
-                    │
-        ┌───────────┴───────────┐
-        ↓                       ↓
-┌──────────────┐        ┌──────────────┐
-│ Audio/Trans  │        │ Intelligence │
-│              │        │              │
-│ • Recorder   │        │ • Event      │
-│ • Transcript │        │   Extraction │
-│              │        │ • Summarizer │
-└──────────────┘        └──────────────┘
-        ↓                       ↓
-┌──────────────┐        ┌──────────────┐
-│ Vision/Data  │        │ Integration  │
-│              │        │              │
-│ • Persona    │        │ • Sheets     │
-│ • OCR        │        │ • GroupMe    │
-│              │        │ • Approval   │
-└──────────────┘        └──────────────┘
-        ↓                       ↓
-┌──────────────┐        ┌──────────────┐
-│ Security     │        │ State Mgmt   │
-│              │        │              │
-│ • Guardrails │        │ • MongoDB    │
-│ • PII Scrub  │        │ • Redis      │
-└──────────────┘        └──────────────┘
+- Node.js 18+ installed
+- MongoDB running (via Docker or locally)
+- Redis running (via Docker or locally)
+- Your existing backend code
+- API keys configured in `.env`
+
+---
+
+## 🚀 Quick Setup (15 minutes)
+
+### Step 1: Restructure Project
+
+```powershell
+# Run the restructure script
+.\restructure-to-web.ps1
+
+# Or manually:
+Remove-Item -Recurse -Force mobile
+mkdir -p frontend/{public,src/{components,hooks,services,styles}}
 ```
 
-### Data Flow
+### Step 2: Install Frontend Dependencies
 
-```
-1. Mobile App → Start Recording
-2. Audio Chunks (30s) → Upload → Transcription Agent
-3. Transcript → Event Extraction Agent → NLU Events
-4. Events → Summarizer Agent → Group + Personal Summaries
-5. Summaries → Write Requests → DM Approval Queue
-6. DM Approves → Sheets Agent → Google Sheets Update
-7. Sheets Updated → GroupMe Agent → Send Messages
+```powershell
+cd frontend
+npm install
+
+# Install all dependencies
+npm install react@^18.2.0 react-dom@^18.2.0 react-router-dom@^6.20.0 `
+  @mui/material@^5.14.20 @mui/icons-material@^5.14.19 `
+  @emotion/react@^11.11.1 @emotion/styled@^11.11.0 `
+  axios@^1.6.2 zustand@^4.4.7 recharts@^2.10.3 `
+  @vitejs/plugin-react@^4.2.1 vite@^5.0.8 --save
 ```
 
-## 📦 Project Structure
+### Step 3: Create Frontend Files
+
+Create these files in `frontend/` (copy from artifacts above):
+
+**Configuration:**
+- `vite.config.js`
+- `index.html`
+- `src/main.jsx`
+
+**Core App:**
+- `src/App.jsx`
+- `src/store/sessionStore.js`
+- `src/services/api.js`
+- `src/hooks/useAudioRecorder.js`
+
+**Components:**
+- `src/components/SessionRecorder.jsx`
+- `src/components/Dashboard.jsx`
+- `src/components/ApprovalQueue.jsx`
+- `src/components/PlayerList.jsx`
+
+### Step 4: Update Backend
+
+Replace `backend/server.js` with the updated version from artifacts (includes React serving).
+
+### Step 5: Start Development Servers
+
+```powershell
+# Terminal 1: Start MongoDB & Redis
+docker-compose up -d mongodb redis
+
+# Terminal 2: Start Backend API
+npm run dev
+
+# Terminal 3: Start Frontend Dev Server
+cd frontend
+npm run dev
+```
+
+---
+
+## 🎮 Usage
+
+### Development Mode
+
+1. **Open Browser**: http://localhost:5173
+2. **Click "Start Recording Session"**
+3. **Allow microphone** when prompted
+4. **Speak your D&D gameplay**
+5. **Click "Process Chunk"** every 30-60 seconds
+6. **View transcripts and events** in real-time
+7. **Click "End Session"** when done
+
+### Testing Without Audio
+
+Use the test script to simulate sessions:
+
+```powershell
+# Backend must be running
+node test-complete-pipeline.js
+```
+
+---
+
+## 🏗️ Project Structure (Updated)
 
 ```
 dungeons-adk/
-├── backend/
-│   ├── agents/
-│   │   ├── base-agent.js              # Base agent class
-│   │   ├── transcription-agent.js     # ASR & diarization
-│   │   ├── event-extraction-agent.js  # NLU event detection
-│   │   ├── summarizer-agent.js        # Summary generation
-│   │   ├── ocr-agent.js               # Stat sheet OCR
-│   │   ├── persona-agent.js           # Character persona
-│   │   ├── sheets-agent.js            # Google Sheets sync
-│   │   ├── groupme-agent.js           # Messaging
-│   │   ├── state-manager-agent.js     # State persistence
-│   │   ├── guardrails-agent.js        # Security & privacy
-│   │   └── orchestrator.js            # Agent coordination
-│   └── server.js                      # Express API server
-├── mobile/
+├── frontend/                    # React Web App
+│   ├── public/
 │   ├── src/
-│   │   ├── screens/
-│   │   │   ├── SessionScreen.js       # Recording UI
-│   │   │   ├── ApprovalQueue.js       # DM approval
-│   │   │   ├── PlayerDashboard.js     # Player view
-│   │   │   └── CharacterSetup.js      # Character creation
-│   │   ├── stores/
-│   │   │   └── sessionStore.js        # State management
+│   │   ├── components/
+│   │   │   ├── SessionRecorder.jsx
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── ApprovalQueue.jsx
+│   │   │   └── PlayerList.jsx
+│   │   ├── hooks/
+│   │   │   └── useAudioRecorder.js
 │   │   ├── services/
-│   │   │   └── api.js                 # API client
-│   │   └── components/
-│   ├── App.js
+│   │   │   └── api.js
+│   │   ├── store/
+│   │   │   └── sessionStore.js
+│   │   ├── App.jsx
+│   │   └── main.jsx
+│   ├── index.html
+│   ├── vite.config.js
 │   └── package.json
-├── mcp-servers/
-│   ├── transcription-server.js        # MCP transcription
-│   ├── vision-server.js               # MCP vision/OCR
-│   └── ocr-server.js                  # MCP OCR fallback
-├── .env.example
+│
+├── backend/                     # Node.js API (unchanged)
+│   ├── agents/
+│   │   ├── base-agent.js
+│   │   ├── transcription-agent.js
+│   │   ├── event-extraction-agent.js
+│   │   ├── summarizer-agent.js
+│   │   ├── sheets-agent.js
+│   │   ├── state-manager-agent.js
+│   │   ├── guardrails-agent.js
+│   │   └── orchestrator.js
+│   └── server.js                # ✅ Updated to serve React
+│
+├── uploads/                     # Audio file storage
+├── config/
+│   └── service-account.json
+├── .env
+├── config.js
 ├── package.json
-└── README.md
+└── docker-compose.yml
 ```
 
-## 🚀 Setup & Installation
+---
 
-### Prerequisites
+## 🎤 How Audio Recording Works
 
-1. **Node.js 18+**
-2. **MongoDB** (local or cloud)
-3. **Redis** (local or cloud)
-4. **Google Cloud Project** with:
-   - Cloud Speech-to-Text API
-   - Cloud Vision API
-   - Google Sheets API
-5. **Anthropic API Key** (Claude)
-6. **GroupMe Account** (bot credentials)
+### Web Audio API Flow
 
-### Step 1: Backend Setup
-
-```bash
-# Clone repository
-git clone https://github.com/daedalus-s/dungeons-adk.git
-cd dungeons-adk
-
-# Install dependencies
-npm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your credentials
+```
+User clicks "Start Recording"
+    ↓
+Request microphone permission (browser popup)
+    ↓
+MediaRecorder starts capturing audio
+    ↓
+Audio chunks collected in memory
+    ↓
+User clicks "Process Chunk"
+    ↓
+Stop recording, create Blob
+    ↓
+Upload Blob to backend (/api/sessions/:id/audio)
+    ↓
+Backend transcribes with Google Speech-to-Text
+    ↓
+Extract events with Claude
+    ↓
+Display in UI, store in MongoDB
+    ↓
+Start new recording (loop continues)
 ```
 
-### Step 2: Google Cloud Configuration
+### Audio Format
 
-1. **Create Project**: Go to [Google Cloud Console](https://console.cloud.google.com)
+- **MIME Type**: `audio/webm;codecs=opus` (or browser default)
+- **Bitrate**: 64kbps (optimized for speech)
+- **Channels**: Mono preferred (smaller files)
+- **Sample Rate**: 16kHz ideal for transcription
 
-2. **Enable APIs**:
-   ```
-   - Cloud Speech-to-Text API
-   - Cloud Vision API
-   - Google Sheets API
-   ```
+### Browser Compatibility
 
-3. **Create Service Account**:
-   - IAM & Admin → Service Accounts → Create
-   - Grant roles: "Cloud Speech Client", "Cloud Vision User", "Sheets Editor"
-   - Create JSON key → Download to `config/service-account.json`
+| Browser | Recording | Transcription | Notes |
+|---------|-----------|---------------|-------|
+| Chrome  | ✅        | ✅            | Best support |
+| Edge    | ✅        | ✅            | Chromium-based |
+| Firefox | ✅        | ✅            | Good support |
+| Safari  | ⚠️        | ✅            | Limited WebM support |
+| Mobile Chrome | ✅  | ✅            | Works great |
+| Mobile Safari | ⚠️  | ✅            | Use .mp4 fallback |
 
-4. **Create OAuth2 Credentials** (for mobile):
-   - APIs & Services → Credentials → Create → OAuth client ID
-   - Application type: Web application (for backend) or Android/iOS (for mobile)
-   - Save Client ID and Client Secret
+---
 
-5. **Share Google Sheet**:
-   - Create spreadsheet "Chantilly Library Campaign"
-   - Share with service account email (from JSON key)
-   - Grant "Editor" access
+## 🔧 Configuration
 
-### Step 3: GroupMe Setup
+### Environment Variables
 
-1. **Create Bot**:
-   - Visit https://dev.groupme.com
-   - Sign in → Bots → Create Bot
-   - Select your group
-   - Copy Bot ID and Access Token
+Create `frontend/.env.local`:
 
-2. **Configure in .env**:
-   ```env
-   GROUPME_ACCESS_TOKEN=your_access_token
-   GROUPME_BOT_ID=your_bot_id
-   GROUPME_GROUP_ID=your_group_id
-   ```
-
-3. **Personal DM Setup** (optional):
-   - Implement OAuth flow for user linking
-   - Store GroupMe user ID mapping in database
-
-### Step 4: Database Setup
-
-**MongoDB**:
-```bash
-# Local install
-brew install mongodb-community  # macOS
-sudo apt install mongodb        # Ubuntu
-
-# Or use MongoDB Atlas (cloud)
-# Update MONGODB_URI in .env
+```env
+VITE_API_URL=http://localhost:3000/api
 ```
 
-**Redis**:
-```bash
-# Local install
-brew install redis              # macOS
-sudo apt install redis-server   # Ubuntu
+Backend `.env` (already exists):
 
-# Start Redis
-redis-server
-
-# Or use Redis Cloud
+```env
+PORT=3000
+MONGODB_URI=mongodb://admin:password123@localhost:27017/dungeons-adk?authSource=admin
+REDIS_HOST=localhost
+REDIS_PORT=6379
+ANTHROPIC_API_KEY=your_key_here
+GOOGLE_APPLICATION_CREDENTIALS=./config/service-account.json
+GOOGLE_SHEETS_ID=your_sheet_id_here
+NODE_ENV=development
 ```
 
-### Step 5: Start Backend
+---
 
-```bash
-# Development mode
-npm run dev
+## 📦 Production Build
 
-# Production mode
+### Build Frontend
+
+```powershell
+cd frontend
+npm run build
+# Creates: frontend/dist/
+```
+
+### Deploy Single Server
+
+```powershell
+# Set environment
+$env:NODE_ENV="production"
+
+# Start backend (serves React + API)
 npm start
 
-# MCP Servers (separate terminals)
-node mcp-servers/transcription-server.js
-node mcp-servers/vision-server.js
-node mcp-servers/ocr-server.js
+# Access at http://localhost:3000
 ```
 
-### Step 6: Mobile App Setup
+### Deploy Separately
 
-```bash
-cd mobile
+**Frontend** (Vercel/Netlify):
+```powershell
+# In frontend/
+npm run build
+# Deploy dist/ folder
 
-# Install dependencies
+# Set environment variable:
+VITE_API_URL=https://your-backend.com/api
+```
+
+**Backend** (Railway/Render):
+```powershell
+# Deploy entire backend folder
+# Set environment variables in platform dashboard
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: Microphone Permission Denied
+
+**Solution**: 
+- Check browser permissions in Settings → Privacy → Microphone
+- Ensure HTTPS in production (required for getUserMedia)
+- Try different browser
+
+### Issue: CORS Errors
+
+**Solution**: Backend already has `cors()` middleware enabled. If deploying separately:
+
+```javascript
+// backend/server.js
+app.use(cors({
+  origin: 'https://your-frontend-domain.com',
+  credentials: true
+}));
+```
+
+### Issue: Audio Not Uploading
+
+**Solution**: Check file size limits:
+
+```javascript
+// backend/server.js
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+});
+```
+
+### Issue: "Cannot find module" Errors
+
+**Solution**:
+```powershell
+# Backend
 npm install
 
-# Start Expo
-npm start
-
-# Run on device
-npm run android  # or npm run ios
+# Frontend
+cd frontend
+npm install
 ```
 
-## 🔄 Workflow Implementation
-
-### Session Recording Workflow
-
-```javascript
-// 1. User starts session
-POST /api/sessions
-{
-  "players": [player_ids],
-  "dm_id": "dm_1"
-}
-
-// 2. Upload audio chunks (every 30s)
-POST /api/sessions/:sessionId/audio
-FormData: { audio: file, chunkIndex: 0 }
-
-// 3. Real-time transcription → event extraction
-// (Happens automatically via orchestrator)
-
-// 4. End session
-POST /api/sessions/:sessionId/end
-// Returns: { events, transcripts, summaries, writeRequests }
-
-// 5. DM approves write requests
-POST /api/approvals/:requestId
-{
-  "dm_id": "dm_1",
-  "decision": "approve",
-  "comment": "Looks good!"
-}
-
-// 6. Messages sent automatically after approval
-```
-
-### Character Setup Workflow
-
-```javascript
-// 1. Upload character image for persona
-POST /api/players/:playerId/persona
-FormData: {
-  image: file,
-  characterName: "Aragorn",
-  userPrompt: "Noble ranger with kingly heritage"
-}
-
-// 2. OCR stat sheet
-POST /api/players/:playerId/stat-sheet
-FormData: { image: stat_sheet.jpg }
-
-// 3. Review and confirm parsed data
-// (Mobile app shows preview with confidence scores)
-```
-
-## 🛡️ Security & Privacy
-
-### Guardrails Implementation
-
-1. **PII Detection & Redaction**:
-   - Phone numbers, emails, addresses automatically redacted
-   - Regex + Claude validation
-
-2. **Consent Management**:
-   - In-app consent screen before recording
-   - All participants must opt-in
-
-3. **Data Retention**:
-   - Raw audio: 30 days (default)
-   - Transcripts: Permanent (unless opted out)
-   - Export option for archival
-
-4. **Rate Limiting**:
-   - GroupMe: 50 messages/hour
-   - Sheets: 100 writes/hour
-   - API: 1000 calls/hour
-
-5. **Encryption**:
-   - At-rest: MongoDB encryption
-   - In-transit: TLS/SSL
-   - Secrets: Environment variables + key vault
-
-## 📊 Google Sheets Structure
-
-### Sheet: "Chantilly Library Campaign"
-
-**Tab: "Full group details"**
-```
-| Player real name | Player in-game name | Race  | Role type | Player level | Date joined |
-|-----------------|---------------------|-------|-----------|--------------|-------------|
-| John Doe        | Aragorn            | Human | Ranger    | 5            | 2024-01-15  |
-```
-
-**Tab: "Paul's group inventory"**
-```
-| Purchaser | Bought item    | Amount | Cost | Weight | Total Cost | Remaining | Notes        |
-|-----------|----------------|--------|------|--------|------------|-----------|--------------|
-| Aragorn   | Healing Potion | 3      | 50   | 0.5    | 150        | 2         | Used 1 in... |
-```
-
-**Tab: "2025-10-07 Gameplay - abc123"** (auto-created)
-```
-| Group | Quantity | Item     | Gold Value | Total Value | Distributed To | Sold To | Lesson Learns | Player | Character | Group         |
-|-------|----------|----------|------------|-------------|----------------|---------|---------------|--------|-----------|---------------|
-| Paul  | 5        | Gold Ore | 100        | 500         | Party          |         | Mining quest  | 1      | Aragorn   | Paul's group  |
-```
+---
 
 ## 🧪 Testing
 
-### Unit Tests
+### Test Backend Only
 
-```bash
-npm test
+```powershell
+node test-complete-pipeline.js
 ```
 
-### Integration Tests
+### Test Audio Recording (Browser)
 
-```bash
-# Test full workflow with sample data
-npm run test:integration
+1. Open http://localhost:5173
+2. Open DevTools (F12) → Console
+3. Click "Start Recording"
+4. Check console for:
+   - `Recording started: { mimeType: '...', state: 'recording' }`
+   - Microphone access granted
+5. Speak into mic
+6. Click "Process Chunk"
+7. Check console for:
+   - `Recording stopped: { size: '...KB', type: '...' }`
+   - Upload success message
+
+### Test Full Workflow
+
+```powershell
+# 1. Create test player
+curl -X POST http://localhost:3000/api/players `
+  -H "Content-Type: application/json" `
+  -d '{"real_name":"Test","in_game_name":"Aragorn","race":"Human","role_type":"Ranger","level":5,"group":"Paul"}'
+
+# 2. Use web UI to record and process
+
+# 3. Check dashboard for results
+# Open: http://localhost:5173/dashboard
 ```
 
-### Manual Testing Checklist
+---
 
-- [ ] Start session and record audio
-- [ ] Verify real-time transcription
-- [ ] Check event extraction accuracy
-- [ ] Review generated summaries
-- [ ] Test DM approval flow
-- [ ] Confirm Sheets write
-- [ ] Verify GroupMe messages sent
-- [ ] Test OCR with sample stat sheet
-- [ ] Test persona generation
-- [ ] Check PII redaction
+## 📊 Performance
 
-## 🚢 Deployment
+### File Sizes (2-hour session)
 
-### Backend Deployment (Cloud Run / AWS ECS)
+- **16kHz mono @ 64kbps**: ~56 MB total
+- **Per chunk (30s)**: ~960 KB
+- **Upload time (30s chunk)**: ~1-2 seconds
 
-```bash
-# Build Docker image
-docker build -t dungeons-adk-backend .
+### Processing Times
 
-# Push to registry
-docker push gcr.io/your-project/dungeons-adk-backend
+- **Transcription**: ~2-3 seconds per 30s chunk
+- **Event extraction**: ~1-2 seconds
+- **Total per chunk**: ~3-5 seconds
+- **End session summary**: ~5-10 seconds
 
-# Deploy to Cloud Run
-gcloud run deploy dungeons-adk \
-  --image gcr.io/your-project/dungeons-adk-backend \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
-```
+---
 
-### Mobile Deployment (Expo)
+## 🎯 Next Steps
 
-```bash
-cd mobile
+1. ✅ **Test locally** - Record a short test session
+2. ✅ **Add players** - Use Players tab to create characters
+3. ✅ **Test approvals** - End a session, check Approvals tab
+4. ✅ **Configure Sheets** - Set up Google Sheets integration
+5. ✅ **Deploy** - Build and deploy to production
 
-# Build for Android
-eas build --platform android
+---
 
-# Build for iOS
-eas build --platform ios
+## 📚 Additional Resources
 
-# Submit to stores
-eas submit --platform all
-```
+- **Vite Docs**: https://vitejs.dev
+- **React Router**: https://reactrouter.com
+- **MUI Components**: https://mui.com
+- **Web Audio API**: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
 
-### MCP Servers Deployment
+---
 
-Deploy each MCP server as a separate service:
+## 🎉 Benefits Over Mobile
 
-```bash
-# Transcription server
-gcloud run deploy mcp-transcription \
-  --image gcr.io/your-project/mcp-transcription \
-  --cpu 2 \
-  --memory 4Gi
+| Feature | Mobile (Expo) | Web App |
+|---------|---------------|---------|
+| Audio Recording | ❌ Broken in SDK 54 | ✅ Stable |
+| Cross-Platform | 📱 iOS/Android only | 💻📱 All devices |
+| Deployment | 📦 App stores | 🌐 Instant URL |
+| Updates | ⏳ Store approval | ⚡ Immediate |
+| Development | 🐛 Complex setup | 🚀 Simple |
+| Debugging | 😓 Limited tools | 🔧 Full DevTools |
 
-# Vision server
-gcloud run deploy mcp-vision \
-  --image gcr.io/your-project/mcp-vision \
-  --cpu 2 \
-  --memory 4Gi
-```
+---
 
-## 🎮 Usage Examples
+## 💡 Tips
 
-### For Players
+**For Best Audio Quality:**
+- Use external microphone
+- Quiet environment
+- Speak clearly towards mic
+- Process chunks every 30-60 seconds
 
-1. **Join Session**: Open app → Session tab
-2. **Start Recording**: Tap "Start Session"
-3. **See Live Events**: Real-time event timeline
-4. **End Session**: Tap "Stop" after gameplay
-5. **Wait for Summary**: DM approves → Receive GroupMe DM
+**For Long Sessions:**
+- Keep browser tab active
+- Disable power saving mode
+- Monitor storage space
+- Use wired connection (not Wi-Fi)
 
-### For DMs
+**For Multiple Players:**
+- Use single microphone in center of table
+- Or use conference mic with 360° pickup
+- Ensure everyone speaks clearly
 
-1. **Monitor Session**: Watch real-time events
-2. **Review Approvals**: Approvals tab → See pending writes
-3. **Approve/Reject**: Review data → Approve for Sheets update
-4. **Messages Auto-Send**: After approval, summaries sent
+---
 
-## 🔧 Troubleshooting
+**Questions?** Check the troubleshooting section or open an issue on GitHub!
 
-### Common Issues
-
-**Transcription Slow**:
-- Check MCP server health: `GET /health`
-- Increase server resources
-- Enable parallel processing
-
-**Sheets Write Fails**:
-- Verify service account has Editor access
-- Check sheet ID in .env
-- Review approval status
-
-**GroupMe Messages Not Sending**:
-- Verify bot token is valid
-- Check rate limits
-- Ensure user linking is complete
-
-## 📈 Performance Optimization
-
-1. **Audio Chunking**: 30s chunks for faster processing
-2. **Parallel Agent Execution**: Run agents concurrently
-3. **Redis Caching**: Cache frequent queries
-4. **CDN for Avatars**: Store generated images in CDN
-5. **Database Indexing**: Index session_id, player_id
-
-## 🌟 Advanced Features
-
-### Custom Event Types
-
-Add new event types in `event-extraction-agent.js`:
-
-```javascript
-this.eventTypes = [
-  ...existing,
-  'critical_hit',
-  'natural_20',
-  'character_development'
-];
-```
-
-### Multi-Language Support
-
-Update transcription config:
-
-```javascript
-languageCode: 'es-US' // Spanish
-languageCode: 'fr-FR' // French
-```
-
-### Custom Summarization
-
-Modify prompts in `summarizer-agent.js` for different summary styles.
-
-## 📚 API Reference
-
-See full API documentation: [API_DOCS.md](./API_DOCS.md)
-
-## 🤝 Contributing
-
-1. Fork repository
-2. Create feature branch
-3. Add tests
-4. Submit PR
-
-## 📄 License
-
-ISC License
-
-## 🆘 Support
-
-- GitHub Issues: https://github.com/daedalus-s/dungeons-adk/issues
-- Documentation: https://docs.dungeons-adk.com
-- Discord: https://discord.gg/dungeons-adk
+🎲 **Happy Gaming!** ✨

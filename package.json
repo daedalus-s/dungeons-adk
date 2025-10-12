@@ -1,60 +1,50 @@
 {
   "name": "dungeons-adk",
-  "version": "1.0.0",
-  "description": "Multi-agent D&D session management application using Google ADK and Claude Code",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "AI-powered D&D session recording and management - Web Application",
+  "main": "backend/server.js",
   "type": "module",
   "scripts": {
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
-    "mobile": "cd mobile && npm start",
-    "agents": "node backend/agents/orchestrator.js",
-    "test": "jest",
-    "lint": "eslint ."
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/daedalus-s/dungeons-adk.git"
+    "build": "cd frontend && npm run build",
+    "build:full": "cd frontend && npm install && npm run build",
+    "test": "node test-complete-pipeline.js",
+    "test:backend": "node test-backend-only.js",
+    "docker:up": "docker-compose up -d mongodb redis",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f"
   },
   "keywords": [
     "dnd",
     "dungeons-and-dragons",
-    "adk",
-    "claude-code",
-    "multi-agent",
-    "react-native"
+    "session-recording",
+    "transcription",
+    "ai",
+    "claude",
+    "google-adk",
+    "web-audio"
   ],
-  "author": "",
+  "author": "Your Name",
   "license": "ISC",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.9",
-    "@google-cloud/speech": "^6.7.1",
-    "@google-cloud/vision": "^4.3.3",
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@google-cloud/speech": "^6.10.0",
+    "@google-cloud/vision": "^4.3.2",
     "axios": "^1.12.2",
-    "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "form-data": "^4.0.4",
-    "google-auth-library": "^9.0.0",
-    "googleapis": "^126.0.1",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.19.1",
+    "googleapis": "^144.0.0",
+    "mongoose": "^8.9.3",
     "multer": "^1.4.5-lts.1",
-    "node-fetch": "^2.7.0",
-    "openai": "^4.20.0",
-    "redis": "^4.7.1",
-    "tesseract.js": "^5.0.0",
-    "uuid": "^9.0.1",
-    "ws": "^8.18.3"
+    "redis": "^4.7.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "eslint": "^8.57.1",
-    "jest": "^29.7.0",
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.9"
   },
-  "bugs": {
-    "url": "https://github.com/daedalus-s/dungeons-adk/issues"
-  },
-  "homepage": "https://github.com/daedalus-s/dungeons-adk#readme"
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

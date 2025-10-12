@@ -2,8 +2,13 @@
 import { WebSocketServer } from 'ws';
 import multer from 'multer';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { AgentOrchestrator } from './agents/orchestrator.js';
 import { config } from '../config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = config.port || 3000;
@@ -12,6 +17,9 @@ const PORT = config.port || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve uploaded audio files
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // File upload configuration
 const storage = multer.diskStorage({
@@ -39,14 +47,14 @@ const orchestrator = new AgentOrchestrator({
 const wss = new WebSocketServer({ noServer: true });
 
 wss.on('connection', (ws) => {
-  console.log('ðŸ“± Client connected');
+  console.log('📱 Client connected');
 
   ws.on('message', (message) => {
     console.log('Received:', message.toString());
   });
 
   ws.on('close', () => {
-    console.log('ðŸ“± Client disconnected');
+    console.log('📱 Client disconnected');
   });
 });
 
@@ -61,7 +69,7 @@ const broadcast = (data) => {
 
 // Agent event listeners
 orchestrator.on('agentStateChange', (data) => {
-  console.log(`[Agent] ${data.agent}: ${data.previousState} â†’ ${data.newState}`);
+  console.log(`[Agent] ${data.agent}: ${data.previousState} → ${data.newState}`);
   broadcast({ type: 'agent:state', data });
 });
 
@@ -73,7 +81,7 @@ orchestrator.on('agentError', (data) => {
   console.error(`[Error] ${data.agent}:`, data.error.message);
 });
 
-// ===== ROUTES =====
+// ===== API ROUTES =====
 
 // Health check
 app.get('/health', (req, res) => {
@@ -131,7 +139,6 @@ app.post('/api/sessions', async (req, res) => {
   }
 });
 
-// Upload audio chunk (simulated - for testing without actual audio)
 // Upload audio chunk
 app.post('/api/sessions/:sessionId/audio', upload.single('audio'), async (req, res) => {
   try {
@@ -165,8 +172,7 @@ app.post('/api/sessions/:sessionId/audio', upload.single('audio'), async (req, r
     console.log(`✅ Transcribed ${transcript.wordCount} words`);
 
     // Extract events from transcript
-    const stateManager2 = orchestrator.getAgent('state-manager');
-    const allPlayers = await stateManager2.getAllPlayers();
+    const allPlayers = await stateManager.getAllPlayers();
     const sessionPlayers = allPlayers.filter(p => 
       session.metadata?.players?.includes(p.id)
     );
@@ -182,7 +188,7 @@ app.post('/api/sessions/:sessionId/audio', upload.single('audio'), async (req, r
 
     // Save events to session
     session.event_list.push(...eventData.events);
-    await stateManager2.saveSession(session);
+    await stateManager.saveSession(session);
 
     // Broadcast to connected clients
     broadcast({ 
@@ -212,7 +218,7 @@ app.post('/api/sessions/:sessionId/audio', upload.single('audio'), async (req, r
   }
 });
 
-// Process transcript text (for testing)
+// Process transcript text (for testing without audio)
 app.post('/api/sessions/:sessionId/transcript', async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -403,6 +409,7 @@ app.get('/api/players', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // ===== APPROVAL ROUTES =====
 
 // Get pending write requests
@@ -457,29 +464,6 @@ app.post('/api/approvals/:requestId', async (req, res) => {
   }
 });
 
-// Create write request manually (for testing)
-app.post('/api/write-requests', async (req, res) => {
-  try {
-    const { target_sheet, payload, session_id } = req.body;
-
-    const sheetsAgent = orchestrator.getAgent('sheets');
-    const writeRequest = await sheetsAgent.createWriteRequest(
-      target_sheet,
-      payload,
-      session_id
-    );
-
-    const stateManager = orchestrator.getAgent('state-manager');
-    await stateManager.saveWriteRequest(writeRequest);
-
-    broadcast({ type: 'writeRequest:created', data: writeRequest });
-
-    res.json(writeRequest);
-  } catch (error) {
-    console.error('Error creating write request:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 // ===== STATISTICS =====
 
 app.get('/api/stats', async (req, res) => {
@@ -505,14 +489,26 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// ===== SERVE REACT APP IN PRODUCTION =====
+
+if (process.env.NODE_ENV === 'production') {
+  // Serve static files from React build
+  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+  
+  // Handle client-side routing
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+  });
+}
+
 // ===== START SERVER =====
 
 const server = app.listen(PORT, () => {
-  console.log(`\nðŸš€ Dungeons ADK Server`);
-  console.log(`ðŸ“¡ API: http://localhost:${PORT}`);
-  console.log(`ðŸ”Œ WebSocket: ws://localhost:${PORT}`);
-  console.log(`ðŸ“Š Health: http://localhost:${PORT}/health`);
-  console.log(`\nâœ¨ Ready to process D&D sessions!\n`);
+  console.log(`\n🚀 Dungeons ADK Server`);
+  console.log(`📡 API: http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket: ws://localhost:${PORT}`);
+  console.log(`📊 Health: http://localhost:${PORT}/health`);
+  console.log(`\n✨ Ready to process D&D sessions!\n`);
 });
 
 // WebSocket upgrade
