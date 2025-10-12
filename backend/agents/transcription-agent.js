@@ -15,7 +15,7 @@ export class TranscriptionAgent extends BaseAgent {
       keyFilename: config.googleCredentials || process.env.GOOGLE_APPLICATION_CREDENTIALS
     });
 
-    console.log('âœ… Transcription Agent: Authenticated');
+    console.log('✅ Transcription Agent: Authenticated');
   }
 
   async execute(input) {
@@ -48,12 +48,16 @@ export class TranscriptionAgent extends BaseAgent {
 
   async transcribeAudio(audioPath) {
     const stats = fs.statSync(audioPath);
-    console.log(`  ðŸ“ File size: ${(stats.size / 1024).toFixed(2)} KB`);
+    console.log(`  📄 File size: ${(stats.size / 1024).toFixed(2)} KB`);
 
     const buffer = fs.readFileSync(audioPath);
-    const audioInfo = this.detectAudioFormat(buffer);
+    const audioInfo = this.detectAudioFormat(audioPath, buffer);
     
-    console.log(`  ðŸŽµ Detected: ${audioInfo.sampleRate}Hz, ${audioInfo.channels} channel(s)`);
+    console.log(`  🎵 Format: ${audioInfo.encoding}`);
+    if (audioInfo.sampleRate) {
+      console.log(`  🎵 Sample rate: ${audioInfo.sampleRate}Hz`);
+    }
+    console.log(`  🎵 Channels: ${audioInfo.channels}`);
 
     const audioBytes = buffer.toString('base64');
 
@@ -61,13 +65,11 @@ export class TranscriptionAgent extends BaseAgent {
       content: audioBytes,
     };
 
-    // Configure for the actual audio format
+    // Configure based on detected format
     const config = {
-      encoding: 'LINEAR16',
-      sampleRateHertz: audioInfo.sampleRate,
-      audioChannelCount: audioInfo.channels,
+      encoding: audioInfo.encoding,
       languageCode: 'en-US',
-      enableSpeakerDiarization: audioInfo.channels === 1, // Only works with mono
+      enableSpeakerDiarization: audioInfo.channels === 1,
       diarizationSpeakerCount: audioInfo.channels === 1 ? 6 : undefined,
       enableWordTimeOffsets: true,
       model: 'latest_long',
@@ -75,9 +77,14 @@ export class TranscriptionAgent extends BaseAgent {
       enableAutomaticPunctuation: true
     };
 
+    // Only specify sample rate if we're confident about it (and it's not WebM)
+    if (audioInfo.sampleRate && audioInfo.encoding === 'LINEAR16') {
+      config.sampleRateHertz = audioInfo.sampleRate;
+      config.audioChannelCount = audioInfo.channels;
+    }
+
     if (audioInfo.channels > 1) {
-      console.log('  âš ï¸  Stereo audio detected - speaker diarization disabled');
-      console.log('     For best results, convert to mono');
+      console.log('  ⚠️  Multi-channel audio - speaker diarization disabled');
     }
 
     const request = {
@@ -85,15 +92,16 @@ export class TranscriptionAgent extends BaseAgent {
       config: config,
     };
 
-    console.log('  ðŸŽ¤ Sending to Google Speech-to-Text...');
+    console.log('  🎤 Sending to Google Speech-to-Text...');
+    console.log(`  📋 Config: ${audioInfo.encoding}${config.sampleRateHertz ? ` @ ${config.sampleRateHertz}Hz` : ' (auto-detect rate)'}`);
     
     try {
       const [response] = await this.speechClient.recognize(request);
       
-      console.log('  âœ… Response received');
+      console.log('  ✅ Response received');
 
       if (!response.results || response.results.length === 0) {
-        console.log('  âš ï¸  No speech detected');
+        console.log('  ⚠️  No speech detected');
         return {
           text: '',
           segments: [],
@@ -105,21 +113,60 @@ export class TranscriptionAgent extends BaseAgent {
 
       return this.processDiarizedTranscript(response);
     } catch (error) {
-      console.error('  âŒ Google API Error:', error.message);
+      console.error('  ❌ Google API Error:', error.message);
       throw error;
     }
   }
 
-  detectAudioFormat(buffer) {
-    let sampleRate = 16000;
-    let channels = 1;
-
-    if (buffer.toString('ascii', 0, 4) === 'RIFF') {
-      sampleRate = buffer.readUInt32LE(24);
-      channels = buffer.readUInt16LE(22);
+  detectAudioFormat(filePath, buffer) {
+    const fileName = filePath.toLowerCase();
+    
+    // WebM files (from browser MediaRecorder)
+    if (fileName.endsWith('.webm')) {
+      return {
+        encoding: 'WEBM_OPUS',
+        sampleRate: null, // Let Google auto-detect
+        channels: 1 // Assume mono for now
+      };
     }
-
-    return { sampleRate, channels };
+    
+    // OGG files
+    if (fileName.endsWith('.ogg') || fileName.endsWith('.opus')) {
+      return {
+        encoding: 'OGG_OPUS',
+        sampleRate: null, // Let Google auto-detect
+        channels: 1
+      };
+    }
+    
+    // WAV files - read header
+    if (fileName.endsWith('.wav') && buffer.toString('ascii', 0, 4) === 'RIFF') {
+      const sampleRate = buffer.readUInt32LE(24);
+      const channels = buffer.readUInt16LE(22);
+      
+      return {
+        encoding: 'LINEAR16',
+        sampleRate,
+        channels
+      };
+    }
+    
+    // FLAC files
+    if (fileName.endsWith('.flac') || buffer.toString('ascii', 0, 4) === 'fLaC') {
+      return {
+        encoding: 'FLAC',
+        sampleRate: null,
+        channels: 1
+      };
+    }
+    
+    // Default fallback - let Google figure it out
+    console.log('  ⚠️  Unknown format, using auto-detection');
+    return {
+      encoding: 'ENCODING_UNSPECIFIED',
+      sampleRate: null,
+      channels: 1
+    };
   }
 
   processDiarizedTranscript(response) {

@@ -43,7 +43,7 @@ function App() {
 
         <Box component="footer" sx={{ py: 3, px: 2, mt: 'auto', backgroundColor: '#f5f5f5', textAlign: 'center' }}>
           <Typography variant="body2" color="text.secondary">
-            Built with ❤️ for D&D Players | Powered by Google ADK & Claude
+            Built with ❤️ for Community | Powered by Google ADK & Claude
           </Typography>
         </Box>
       </Box>

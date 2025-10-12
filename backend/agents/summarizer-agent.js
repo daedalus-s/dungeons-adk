@@ -196,41 +196,113 @@ Return JSON:
 
     const rows = [];
 
+    // Default group if no players
+    const defaultGroup = players[0]?.group || 'Unknown';
+
     // Group loot/transactions by item
     const itemMap = new Map();
 
     events.forEach(event => {
-      if (event.type === 'loot' || event.type === 'transaction') {
-        const itemName = event.metadata?.item_name;
-        if (!itemName) return;
+      // Handle loot events
+      if (event.type === 'loot') {
+        // Try to get item name from metadata or action
+        let itemName = event.metadata?.item_name || event.metadata?.items?.[0]?.item;
+        
+        // If no item_name in metadata, try to extract from action
+        if (!itemName && event.action) {
+          // Look for patterns like "finds X" or "discovers X"
+          const match = event.action.match(/finds?\s+(.+?)(?:\s+and|\s*$)/i) ||
+                       event.action.match(/discovers?\s+(.+?)(?:\s+and|\s*$)/i);
+          if (match) {
+            itemName = match[1].trim();
+          }
+        }
+        
+        if (!itemName) {
+          itemName = 'Unspecified Loot';
+        }
 
+        const goldValue = event.metadata?.gold_value || 
+                         event.metadata?.value || 
+                         0;
+        const quantity = event.metadata?.quantity || 1;
+        
         const key = `${itemName}-${event.personalFor?.[0] || 'group'}`;
 
         if (itemMap.has(key)) {
           const existing = itemMap.get(key);
-          existing.quantity += event.metadata?.quantity || 1;
-          existing.totalValue += event.metadata?.gold_value || 0;
+          existing.quantity += quantity;
+          existing.totalValue += goldValue * quantity;
         } else {
+          const playerGroup = event.personalFor?.length === 1
+            ? this.getPlayerGroup(event.personalFor[0], players)
+            : defaultGroup;
+
           itemMap.set(key, {
-            group: event.personalFor?.length === 1
-              ? this.getPlayerGroup(event.personalFor[0], players)
-              : 'Unknown',
-            quantity: event.metadata?.quantity || 1,
+            group: playerGroup,
+            quantity: quantity,
             item: itemName,
-            goldValue: event.metadata?.gold_value || 0,
-            totalValue: (event.metadata?.quantity || 1) * (event.metadata?.gold_value || 0),
+            goldValue: goldValue,
+            totalValue: goldValue * quantity,
             distributedTo: event.personalFor?.map(id =>
               players.find(p => p.id === id)?.in_game_name
-            ).join(', ') || 'Party',
-            soldTo: event.type === 'transaction' ? event.actor : '',
+            ).filter(Boolean).join(', ') || 'Party',
+            soldTo: '',
             player: event.personalFor?.[0] || '',
-            character: event.actor || ''
+            character: event.actor || '',
+            lessonLearns: `From ${event.type} event`
           });
         }
       }
+      
+      // Handle transaction events (buying/selling)
+      if (event.type === 'transaction') {
+        const itemName = event.metadata?.item_name || 'Transaction';
+        const goldValue = event.metadata?.gold_value || event.metadata?.cost || 0;
+        const quantity = event.metadata?.quantity || event.metadata?.amount || 1;
+        
+        const key = `${itemName}-transaction-${event.personalFor?.[0] || 'group'}`;
+        
+        const playerGroup = event.personalFor?.length === 1
+          ? this.getPlayerGroup(event.personalFor[0], players)
+          : defaultGroup;
+
+        itemMap.set(key, {
+          group: playerGroup,
+          quantity: quantity,
+          item: itemName,
+          goldValue: goldValue,
+          totalValue: goldValue * quantity,
+          distributedTo: event.personalFor?.map(id =>
+            players.find(p => p.id === id)?.in_game_name
+          ).filter(Boolean).join(', ') || event.actor || 'Party',
+          soldTo: event.action.includes('buy') ? event.entities?.[0] || 'Merchant' : '',
+          player: event.personalFor?.[0] || '',
+          character: event.actor || '',
+          lessonLearns: event.action
+        });
+      }
+      
+      // Handle combat events with valuable drops
+      if (event.type === 'combat' && event.metadata?.damage) {
+        // Create a combat summary row
+        rows.push({
+          Group: defaultGroup,
+          Quantity: 1,
+          Item: `Combat: ${event.action}`,
+          'Gold Value': 0,
+          'Total Value': 0,
+          'Distributed To': event.actor || 'Party',
+          'Sold To': '',
+          'Lesson Learns': `${event.metadata.damage} damage dealt`,
+          Player: event.personalFor?.[0] || '',
+          Character: event.actor || '',
+          'Group (Paul\'s group or Jonathan\'s group)': defaultGroup
+        });
+      }
     });
 
-    // Convert to rows
+    // Convert itemMap to rows
     itemMap.forEach(item => {
       rows.push({
         Group: item.group,
@@ -240,12 +312,29 @@ Return JSON:
         'Total Value': item.totalValue,
         'Distributed To': item.distributedTo,
         'Sold To': item.soldTo,
-        'Lesson Learns': '', // DM fills this in
+        'Lesson Learns': item.lessonLearns || '',
         Player: item.player,
         Character: item.character,
         'Group (Paul\'s group or Jonathan\'s group)': item.group
       });
     });
+
+    // If no rows generated but we have events, create summary row
+    if (rows.length === 0 && events.length > 0) {
+      rows.push({
+        Group: defaultGroup,
+        Quantity: events.length,
+        Item: 'Session Events',
+        'Gold Value': 0,
+        'Total Value': 0,
+        'Distributed To': 'Party',
+        'Sold To': '',
+        'Lesson Learns': `${events.length} events recorded`,
+        Player: '',
+        Character: '',
+        'Group (Paul\'s group or Jonathan\'s group)': defaultGroup
+      });
+    }
 
     return {
       sheetName: `${date} Gameplay - ${sessionId}`,

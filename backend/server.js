@@ -269,6 +269,7 @@ app.post('/api/sessions/:sessionId/transcript', async (req, res) => {
 });
 
 // End session and process
+// End session and process
 app.post('/api/sessions/:sessionId/end', async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -296,6 +297,33 @@ app.post('/api/sessions/:sessionId/end', async (req, res) => {
       end_ts: new Date(),
       summaries: summaries
     });
+
+    console.log('✅ Summaries generated');
+
+    // Create write request if sheets data exists
+    const sheetsAgent = orchestrator.getAgent('sheets');
+    if (sheetsAgent && summaries.sheetsData && summaries.sheetsData.rows?.length > 0) {
+      console.log('📊 Creating write request for Google Sheets...');
+      
+      const writeRequest = await sheetsAgent.createWriteRequest(
+        summaries.sheetsData.sheetName,
+        summaries.sheetsData,
+        sessionId
+      );
+      
+      await stateManager.saveWriteRequest(writeRequest);
+      console.log('✅ Write request created (pending DM approval)');
+      
+      broadcast({ type: 'write:request:created', data: { requestId: writeRequest.id } });
+    } else {
+      if (!sheetsAgent) {
+        console.log('⚠️  Sheets agent not configured - skipping write request');
+      } else if (!summaries.sheetsData) {
+        console.log('⚠️  No sheets data generated - skipping write request');
+      } else if (!summaries.sheetsData.rows || summaries.sheetsData.rows.length === 0) {
+        console.log('⚠️  Sheets data has no rows - skipping write request');
+      }
+    }
 
     broadcast({ type: 'session:completed', data: { sessionId } });
 
