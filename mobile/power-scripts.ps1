@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect } from 'react';
+@'
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
 import { Button, Card, Text, FAB, Chip, ActivityIndicator } from 'react-native-paper';
 import { useAudioRecorder, RecordingPresets } from 'expo-audio';
@@ -88,7 +89,7 @@ export default function SessionScreen() {
       // Start recording
       await audioRecorder.record();
 
-      Alert.alert('Session Started! ðŸŽ²', 'Recording your D&D session. Tap "Process" to transcribe.');
+      Alert.alert('Session Started! 🎲', 'Recording your D&D session. Tap "Process" to transcribe.');
 
     } catch (error) {
       console.error('Failed to start session:', error);
@@ -123,7 +124,7 @@ export default function SessionScreen() {
       // Add transcript
       if (response.data.transcript?.text) {
         appendTranscript(response.data.transcript.text);
-        Alert.alert('Transcribed! ðŸ“', response.data.transcript.text);
+        Alert.alert('Transcribed! 📝', response.data.transcript.text);
       } else {
         Alert.alert('No Speech Detected', 'Try speaking louder or closer to the microphone');
       }
@@ -131,7 +132,7 @@ export default function SessionScreen() {
       // Add events
       if (response.data.events && response.data.events.length > 0) {
         response.data.events.forEach(event => addEvent(event));
-        Alert.alert('Events Found! âš”ï¸', `Detected ${response.data.events.length} events`);
+        Alert.alert('Events Found! ⚔️', `Detected ${response.data.events.length} events`);
       }
 
       setChunkCount(prev => prev + 1);
@@ -169,7 +170,7 @@ export default function SessionScreen() {
       await api.endSession(sessionId);
 
       Alert.alert(
-        'Session Complete! ðŸŽ‰', 
+        'Session Complete! 🎉', 
         'Your D&D session has been processed. Summaries are pending DM approval.',
         [{ text: 'OK', onPress: () => clearSession() }]
       );
@@ -195,11 +196,11 @@ export default function SessionScreen() {
       <ScrollView style={styles.scrollView}>
         <Card style={styles.card}>
           <Card.Content>
-            <Text variant="headlineMedium">ðŸŽ² D&D Session Recorder</Text>
+            <Text variant="headlineMedium">🎲 D&D Session Recorder</Text>
             
             {!hasPermission && (
               <Text style={styles.warning}>
-                âš ï¸ Microphone permission required. Tap "Start Session" to grant access.
+                ⚠️ Microphone permission required. Tap "Start Session" to grant access.
               </Text>
             )}
             
@@ -218,9 +219,9 @@ export default function SessionScreen() {
                   <Text variant="displaySmall">{formatDuration(recordingDuration)}</Text>
                 </View>
                 
-                <Text style={styles.info}>ðŸ“‹ Session ID: ...{sessionId?.slice(-8)}</Text>
-                <Text style={styles.info}>ðŸ“¦ Chunks processed: {chunkCount}</Text>
-                <Text style={styles.info}>âš”ï¸ Events detected: {events.length}</Text>
+                <Text style={styles.info}>📋 Session ID: ...{sessionId?.slice(-8)}</Text>
+                <Text style={styles.info}>📦 Chunks processed: {chunkCount}</Text>
+                <Text style={styles.info}>⚔️ Events detected: {events.length}</Text>
               </>
             )}
           </Card.Content>
@@ -229,7 +230,7 @@ export default function SessionScreen() {
         {transcript.length > 0 && (
           <Card style={styles.card}>
             <Card.Content>
-              <Text variant="titleLarge">ðŸ“ Transcript</Text>
+              <Text variant="titleLarge">📝 Transcript</Text>
               <Text style={styles.transcript}>{transcript}</Text>
             </Card.Content>
           </Card>
@@ -238,7 +239,7 @@ export default function SessionScreen() {
         {events.length > 0 && (
           <Card style={styles.card}>
             <Card.Content>
-              <Text variant="titleLarge">âš”ï¸ Events ({events.length})</Text>
+              <Text variant="titleLarge">⚔️ Events ({events.length})</Text>
               {events.slice(-5).reverse().map((event, idx) => (
                 <View key={idx} style={styles.event}>
                   <Chip icon="sword" style={styles.eventChip}>{event.type.toUpperCase()}</Chip>
@@ -246,10 +247,10 @@ export default function SessionScreen() {
                     <Text style={{ fontWeight: 'bold' }}>{event.actor}:</Text> {event.action}
                   </Text>
                   {event.metadata?.damage && (
-                    <Text style={styles.damage}>ðŸ’¥ {event.metadata.damage} damage</Text>
+                    <Text style={styles.damage}>💥 {event.metadata.damage} damage</Text>
                   )}
                   {event.metadata?.gold_value && (
-                    <Text style={styles.gold}>ðŸ’° {event.metadata.gold_value} gold</Text>
+                    <Text style={styles.gold}>💰 {event.metadata.gold_value} gold</Text>
                   )}
                 </View>
               ))}
@@ -364,3 +365,4 @@ const styles = StyleSheet.create({
   processingText: { color: 'white', marginTop: 16, fontSize: 18, fontWeight: 'bold' },
   processingSubtext: { color: '#ccc', marginTop: 8, fontSize: 14 }
 });
+'@ | Out-File -Encoding UTF8 src/screens/SessionScreen.js
