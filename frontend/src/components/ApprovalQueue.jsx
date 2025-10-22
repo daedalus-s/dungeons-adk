@@ -14,6 +14,7 @@ export default function ApprovalQueue() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [comment, setComment] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     loadRequests();
@@ -22,15 +23,25 @@ export default function ApprovalQueue() {
   const loadRequests = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      console.log('📋 Fetching pending approvals...');
       const response = await api.getPendingApprovals();
+      console.log('📊 Response:', response.data);
+      
+      if (!Array.isArray(response.data)) {
+        throw new Error('API response is not an array');
+      }
+      
       setRequests(response.data);
+      console.log(`✅ Loaded ${response.data.length} pending approvals`);
     } catch (error) {
-      console.error('Failed to load approvals:', error);
+      console.error('❌ Failed to load approvals:', error);
+      setError(error.message);
     } finally {
       setLoading(false);
     }
   };
-
   const handleApprove = async (requestId) => {
     try {
       setProcessing(true);

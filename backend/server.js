@@ -339,6 +339,7 @@ app.post('/api/sessions/:sessionId/end', async (req, res) => {
   }
 });
 
+
 // Get session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
