@@ -1,7 +1,8 @@
 import { BaseAgent } from './base-agent.js';
 
 /**
- * SummarizerAgent - Creates group summaries, personal summaries, and sheets data
+ * SummarizerAgent - Creates DM-style narrative summaries for sessions
+ * Enhanced with dramatic storytelling and immersive language
  */
 export class SummarizerAgent extends BaseAgent {
   constructor(config) {
@@ -14,7 +15,7 @@ export class SummarizerAgent extends BaseAgent {
   }
 
   /**
-   * Main execution: generate all summaries
+   * Main execution: generate all summaries with DM flair
    */
   async execute(input) {
     const { sessionId, events, transcripts, players } = input;
@@ -23,10 +24,10 @@ export class SummarizerAgent extends BaseAgent {
     this.log('info', `Generating summaries for session ${sessionId}`);
 
     try {
-      // Generate group summary
+      // Generate epic group summary with DM narration
       const groupSummary = await this.generateGroupSummary(events, transcripts);
 
-      // Generate per-player summaries
+      // Generate personalized player summaries
       const playerSummaries = await this.generatePlayerSummaries(events, players);
 
       // Generate Google Sheets row data
@@ -52,7 +53,7 @@ export class SummarizerAgent extends BaseAgent {
   }
 
   /**
-   * Generate group summary with key events and TL;DR
+   * Generate epic DM-style group summary
    */
   async generateGroupSummary(events, transcripts) {
     const prompt = this.buildGroupSummaryPrompt(events, transcripts);
@@ -63,8 +64,8 @@ export class SummarizerAgent extends BaseAgent {
         content: prompt
       }
     ], {
-      max_tokens: 3000,
-      temperature: 0.5
+      max_tokens: 4000,
+      temperature: 0.7 // Higher temperature for more creative narration
     });
 
     const summary = this.parseClaudeResponse(response.content[0].text);
@@ -75,17 +76,23 @@ export class SummarizerAgent extends BaseAgent {
       key_events: summary.key_events || [],
       top_loot: summary.top_loot || [],
       decisions: summary.decisions || [],
-      highlights: summary.highlights || []
+      highlights: summary.highlights || [],
+      cliffhanger: summary.cliffhanger || ''
     };
   }
 
   /**
-   * Build group summary prompt
+   * Build DM-style narrative prompt
    */
   buildGroupSummaryPrompt(events, transcripts) {
     const eventsSummary = this.categorizeEvents(events);
 
-    return `You are summarizing a D&D game session for the entire party. Create an engaging group summary.
+    return `You are an experienced Dungeon Master narrating a recap of tonight's D&D session. Your tone should be:
+- Dramatic and evocative, like a storyteller around a campfire
+- Use vivid imagery and D&D terminology
+- Celebratory of victories, respectful of challenges
+- Create anticipation for the next session
+- Use phrases like "The party," "Our heroes," "The brave adventurers"
 
 Session Events (${events.length} total):
 Combat Events: ${eventsSummary.combat.length}
@@ -100,26 +107,36 @@ ${eventsSummary.decision.map(e => `- ${e.action}`).join('\n')}
 Exploration: ${eventsSummary.exploration.length}
 ${eventsSummary.exploration.map(e => `- ${e.action}`).join('\n')}
 
-Create a summary with:
-1. A catchy TL;DR (1-2 sentences)
-2. Key story beats (3-5 bullet points)
-3. Top loot/rewards
-4. Major decisions made
-5. Memorable moments/highlights
+Important Dialogue: ${eventsSummary.dialogue.length}
+${eventsSummary.dialogue.slice(0, 3).map(e => `- ${e.action}`).join('\n')}
+
+Create an immersive DM-style summary with:
+1. **Epic Opening Hook** - A dramatic 1-2 sentence TL;DR that captures the session's essence
+2. **The Tale Unfolds** - A 3-4 paragraph narrative that weaves together the key events like a story
+3. **Spoils of Victory** - List treasure and rewards with flair
+4. **Pivotal Moments** - Highlight critical decisions and their potential consequences
+5. **Session Highlights** - The most memorable or hilarious moments
+6. **Cliffhanger** - End with anticipation for next session
+
+Writing style examples:
+- Instead of "The party fought enemies": "Steel clashed against claw as our heroes stood united against the goblin horde"
+- Instead of "They found gold": "Amidst the rubble, the glint of gold caught their eyes - 50 pieces, hard-earned spoils of their victory"
+- Instead of "They decided to go north": "After much deliberation, the party chose the northern passage, unaware of what lurked in the shadows ahead"
 
 Return JSON:
 {
-  "message_text": "Full summary for GroupMe (engaging, 3-4 paragraphs)",
-  "tldr": "One-sentence hook",
-  "key_events": ["event 1", "event 2", ...],
-  "top_loot": ["item (value)", ...],
-  "decisions": ["decision 1", ...],
-  "highlights": ["memorable moment 1", ...]
+  "message_text": "Full DM-style narrative summary (4-6 paragraphs, dramatic and engaging)",
+  "tldr": "Epic one-sentence hook with dramatic flair",
+  "key_events": ["Dramatic event 1", "Dramatic event 2", ...],
+  "top_loot": ["Treasure 1 with description", "Treasure 2 with description", ...],
+  "decisions": ["Decision 1 with consequences hinted", ...],
+  "highlights": ["Memorable moment 1 narrated dramatically", ...],
+  "cliffhanger": "A teasing hint about what's to come next session"
 }`;
   }
 
   /**
-   * Generate personalized summaries for each player
+   * Generate personalized player summaries with heroic language
    */
   async generatePlayerSummaries(events, players) {
     const summaries = [];
@@ -130,13 +147,13 @@ Return JSON:
       );
 
       if (playerEvents.length === 0) {
-        // Player was inactive or observing
         summaries.push({
           player_id: player.id,
-          message_text: `Hey ${player.real_name}! You were part of this session, but no specific events were tagged to ${player.in_game_name} this time. Check the group summary for the full story!`,
+          message_text: `Greetings, ${player.real_name}! While ${player.in_game_name} witnessed the unfolding events alongside the party, no specific deeds were recorded in the annals for this session. Fear not, brave adventurer - your presence was felt, and greater glory awaits in sessions to come!`,
           stat_changes: [],
           loot: [],
-          notes: []
+          notes: [],
+          accomplishments: []
         });
         continue;
       }
@@ -152,26 +169,40 @@ Return JSON:
   }
 
   /**
-   * Generate summary for a single player
+   * Generate epic personal summary for a single player
    */
   async generateSinglePlayerSummary(player, events) {
-    const prompt = `Create a personalized D&D session summary for ${player.in_game_name} (played by ${player.real_name}).
+    const prompt = `You are a Dungeon Master writing a personal session recap for ${player.in_game_name} (played by ${player.real_name}). Write in second person ("You did...") with dramatic flair.
 
-Their events:
+Character: ${player.in_game_name}
+Race: ${player.race}
+Class: ${player.role_type}
+Level: ${player.level}
+
+Their Epic Deeds This Session:
 ${events.map(e => `- ${e.type}: ${e.action} ${e.metadata ? JSON.stringify(e.metadata) : ''}`).join('\n')}
 
-Create a personalized message including:
-- What ${player.in_game_name} accomplished
-- Items acquired/used
-- Stat changes (XP, HP, etc.)
-- Personal highlights
+Create a personalized heroic narrative including:
+1. **Opening Address** - "Hail, brave ${player.role_type}!" or similar
+2. **Your Valor** - Their accomplishments told dramatically in 2-3 paragraphs
+3. **Spoils Claimed** - Items/gold acquired with description
+4. **Growth & Power** - Stat changes (XP, level ups, etc.)
+5. **Deeds of Note** - Personal highlights and memorable moments
+6. **The Road Ahead** - Teaser for their character's future
+
+Use evocative language like:
+- "Your blade sang through the air"
+- "With cunning and wit, you unraveled the mystery"
+- "The spoils of your victory include..."
+- "Your legend grows, ${player.in_game_name}"
 
 Return JSON:
 {
-  "message_text": "Personal summary for DM (2-3 paragraphs, enthusiastic tone)",
-  "stat_changes": [{"stat": "XP", "change": "+500"}],
-  "loot": ["item name (value)"],
-  "notes": ["special note 1", ...]
+  "message_text": "Personalized DM narration (3-4 paragraphs, heroic tone, second person)",
+  "stat_changes": [{"stat": "Experience Points", "change": "+500", "description": "Hard-won through valorous combat"}],
+  "loot": ["Item name (value) - brief dramatic description"],
+  "notes": ["Special note about character moment 1", ...],
+  "accomplishments": ["Defeated the goblin chieftain", "Discovered the hidden chamber", ...]
 }`;
 
     const response = await this.callClaude([
@@ -180,37 +211,29 @@ Return JSON:
         content: prompt
       }
     ], {
-      max_tokens: 2000,
-      temperature: 0.6
+      max_tokens: 2500,
+      temperature: 0.7
     });
 
     return this.parseClaudeResponse(response.content[0].text);
   }
 
   /**
-   * Generate Google Sheets row data
+   * Generate Google Sheets row data (unchanged)
    */
   async generateSheetsData(events, players) {
-    const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const date = new Date().toISOString().split('T')[0];
     const sessionId = Math.random().toString(36).substring(7);
 
     const rows = [];
-
-    // Default group if no players
     const defaultGroup = players[0]?.group || 'Unknown';
-
-    // Group loot/transactions by item
     const itemMap = new Map();
 
     events.forEach(event => {
-      // Handle loot events
       if (event.type === 'loot') {
-        // Try to get item name from metadata or action
         let itemName = event.metadata?.item_name || event.metadata?.items?.[0]?.item;
         
-        // If no item_name in metadata, try to extract from action
         if (!itemName && event.action) {
-          // Look for patterns like "finds X" or "discovers X"
           const match = event.action.match(/finds?\s+(.+?)(?:\s+and|\s*$)/i) ||
                        event.action.match(/discovers?\s+(.+?)(?:\s+and|\s*$)/i);
           if (match) {
@@ -255,7 +278,6 @@ Return JSON:
         }
       }
       
-      // Handle transaction events (buying/selling)
       if (event.type === 'transaction') {
         const itemName = event.metadata?.item_name || 'Transaction';
         const goldValue = event.metadata?.gold_value || event.metadata?.cost || 0;
@@ -283,9 +305,7 @@ Return JSON:
         });
       }
       
-      // Handle combat events with valuable drops
       if (event.type === 'combat' && event.metadata?.damage) {
-        // Create a combat summary row
         rows.push({
           Group: defaultGroup,
           Quantity: 1,
@@ -302,7 +322,6 @@ Return JSON:
       }
     });
 
-    // Convert itemMap to rows
     itemMap.forEach(item => {
       rows.push({
         Group: item.group,
@@ -319,7 +338,6 @@ Return JSON:
       });
     });
 
-    // If no rows generated but we have events, create summary row
     if (rows.length === 0 && events.length > 0) {
       rows.push({
         Group: defaultGroup,
@@ -354,6 +372,9 @@ Return JSON:
       dialogue: [],
       transaction: [],
       levelup: [],
+      skill_check: [],
+      rest: [],
+      shopping: [],
       other: []
     };
 
@@ -366,11 +387,10 @@ Return JSON:
   }
 
   /**
-   * Get player's group (Paul's or Jonathan's)
+   * Get player's group
    */
   getPlayerGroup(playerId, players) {
     const player = players.find(p => p.id === playerId);
-    // This would be stored in player metadata
     return player?.group || 'Unknown';
   }
 

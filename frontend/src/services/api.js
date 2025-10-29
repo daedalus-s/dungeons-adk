@@ -19,6 +19,9 @@ export const api = {
   getSession: (sessionId) => 
     apiClient.get(`/sessions/${sessionId}`),
   
+  getSessionDetails: (sessionId) =>
+    apiClient.get(`/sessions/${sessionId}/details`),
+  
   getAllSessions: () => 
     apiClient.get('/sessions'),
   
@@ -48,12 +51,26 @@ export const api = {
   getPendingApprovals: () => 
     apiClient.get('/approvals/pending'),
   
-  approveRequest: (requestId, dmId, decision, comment) => 
+  approveRequest: (requestId, dmId, decision, comment, sendToGroupMe = true) => 
     apiClient.post(`/approvals/${requestId}`, { 
       dm_id: dmId, 
       decision, 
-      comment 
+      comment,
+      send_to_groupme: sendToGroupMe
     }),
+  
+  // GroupMe endpoints
+  linkPlayerToGroupMe: (playerId, groupmeUserId) =>
+    apiClient.post('/groupme/link', { player_id: playerId, groupme_user_id: groupmeUserId }),
+  
+  getGroupMeMembers: () =>
+    apiClient.get('/groupme/members'),
+  
+  testGroupMeBot: () =>
+    apiClient.post('/groupme/test'),
+  
+  sendTestMessage: (sessionId) =>
+    apiClient.post(`/groupme/test-message/${sessionId}`),
   
   // Stats
   getStats: () => 

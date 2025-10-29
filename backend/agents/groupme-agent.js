@@ -2,7 +2,7 @@ import { BaseAgent } from './base-agent.js';
 import axios from 'axios';
 
 /**
- * GroupMeAgent - Sends group summaries and personal DMs
+ * GroupMeAgent - Sends DM-style summaries to group chat and personal DMs
  */
 export class GroupMeAgent extends BaseAgent {
   constructor(config) {
@@ -20,36 +20,59 @@ export class GroupMeAgent extends BaseAgent {
   }
 
   /**
-   * Main execution: send session summaries
+   * Main execution: send epic session summaries
    */
   async execute(input) {
     const { sessionId, groupSummary, playerSummaries, appDeepLink } = input;
 
     this.setState('running', { sessionId });
-    this.log('info', `Sending summaries for session ${sessionId}`);
+    this.log('info', `Sending epic summaries for session ${sessionId}`);
 
     try {
       const results = {
         groupMessage: null,
-        personalMessages: []
+        personalMessages: [],
+        errors: []
       };
 
       // Send group summary
       if (groupSummary) {
-        results.groupMessage = await this.sendGroupMessage(groupSummary, appDeepLink);
+        try {
+          results.groupMessage = await this.sendGroupMessage(groupSummary, appDeepLink);
+          this.log('info', 'Group message sent successfully');
+        } catch (error) {
+          this.log('error', 'Failed to send group message', error);
+          results.errors.push({ type: 'group', error: error.message });
+        }
       }
 
       // Send personal DMs
       if (playerSummaries && playerSummaries.length > 0) {
         for (const playerSummary of playerSummaries) {
-          const result = await this.sendPersonalDM(playerSummary);
-          results.personalMessages.push(result);
+          try {
+            const result = await this.sendPersonalDM(playerSummary);
+            results.personalMessages.push(result);
+            
+            if (result.status === 'delivered') {
+              this.log('info', `Personal message sent to player ${playerSummary.player_id}`);
+            } else {
+              this.log('warn', `Personal message skipped for player ${playerSummary.player_id}: ${result.reason}`);
+            }
+          } catch (error) {
+            this.log('error', `Failed to send DM to player ${playerSummary.player_id}`, error);
+            results.errors.push({ 
+              type: 'personal', 
+              playerId: playerSummary.player_id, 
+              error: error.message 
+            });
+          }
         }
       }
 
       this.setState('completed', {
         groupSent: !!results.groupMessage,
-        personalSent: results.personalMessages.length
+        personalSent: results.personalMessages.filter(m => m.status === 'delivered').length,
+        errors: results.errors.length
       });
 
       this.emit('messagesDelivered', results);
@@ -62,7 +85,7 @@ export class GroupMeAgent extends BaseAgent {
   }
 
   /**
-   * Send group message via bot
+   * Send epic group message via bot
    */
   async sendGroupMessage(groupSummary, appDeepLink) {
     const messageText = this.formatGroupMessage(groupSummary, appDeepLink);
@@ -81,11 +104,11 @@ export class GroupMeAgent extends BaseAgent {
     );
 
     if (response.status === 202) {
-      this.log('info', 'Group message sent successfully');
       return {
         message_id: response.data.message?.id || 'sent',
         status: 'delivered',
-        timestamp: new Date()
+        timestamp: new Date(),
+        preview: messageText.substring(0, 100) + '...'
       };
     }
 
@@ -93,51 +116,82 @@ export class GroupMeAgent extends BaseAgent {
   }
 
   /**
-   * Format group message
+   * Format epic group message with DM flair
    */
   formatGroupMessage(groupSummary, appDeepLink) {
-    let message = `🎲 D&D Session Summary 🎲\n\n`;
-    message += `${groupSummary.tldr}\n\n`;
-    message += `📜 Key Events:\n`;
-    groupSummary.key_events?.forEach(event => {
-      message += `• ${event}\n`;
-    });
+    let message = `🎲✨ SESSION RECAP ✨🎲\n\n`;
+    
+    // Epic TL;DR
+    message += `📜 ${groupSummary.tldr}\n\n`;
+    
+    // Main narrative
+    message += `═══════════════════════════\n`;
+    message += `📖 THE TALE UNFOLDS\n`;
+    message += `═══════════════════════════\n\n`;
+    
+    // Split message text into paragraphs for better formatting
+    const paragraphs = groupSummary.message_text.split('\n\n');
+    message += paragraphs.slice(0, 2).join('\n\n') + '\n\n';
+    
+    // Key events with dramatic icons
+    if (groupSummary.key_events?.length > 0) {
+      message += `⚔️ EPIC MOMENTS:\n`;
+      groupSummary.key_events.slice(0, 4).forEach(event => {
+        message += `  ⚡ ${event}\n`;
+      });
+      message += `\n`;
+    }
 
+    // Loot with treasure icons
     if (groupSummary.top_loot?.length > 0) {
-      message += `\n💰 Loot Acquired:\n`;
-      groupSummary.top_loot.forEach(item => {
-        message += `• ${item}\n`;
+      message += `💰 SPOILS OF VICTORY:\n`;
+      groupSummary.top_loot.slice(0, 5).forEach(item => {
+        message += `  💎 ${item}\n`;
       });
+      message += `\n`;
     }
 
+    // Decisions with consequence hints
     if (groupSummary.decisions?.length > 0) {
-      message += `\n⚔️ Major Decisions:\n`;
-      groupSummary.decisions.forEach(decision => {
-        message += `• ${decision}\n`;
+      message += `🔮 PIVOTAL CHOICES:\n`;
+      groupSummary.decisions.slice(0, 3).forEach(decision => {
+        message += `  🎯 ${decision}\n`;
       });
+      message += `\n`;
     }
 
+    // Memorable moments
     if (groupSummary.highlights?.length > 0) {
-      message += `\n✨ Memorable Moments:\n`;
-      groupSummary.highlights.forEach(highlight => {
-        message += `• ${highlight}\n`;
+      message += `✨ LEGENDARY MOMENTS:\n`;
+      groupSummary.highlights.slice(0, 3).forEach(highlight => {
+        message += `  🌟 ${highlight}\n`;
       });
+      message += `\n`;
     }
 
+    // Cliffhanger
+    if (groupSummary.cliffhanger) {
+      message += `═══════════════════════════\n`;
+      message += `🌙 WHAT LIES AHEAD...\n`;
+      message += `${groupSummary.cliffhanger}\n`;
+      message += `═══════════════════════════\n\n`;
+    }
+
+    // Footer
+    message += `🎲 Roll on, brave adventurers! Until next we meet!\n`;
+    
     if (appDeepLink) {
-      message += `\n📱 View full details: ${appDeepLink}`;
+      message += `\n📱 Full session details: ${appDeepLink}`;
     }
 
     return message;
   }
 
   /**
-   * Send personal DM to a player
-   * Note: GroupMe requires user ID for DMs, may need user linking
+   * Send heroic personal DM to a player
    */
   async sendPersonalDM(playerSummary) {
     try {
-      // Get user ID from GroupMe (requires linking)
       const userId = await this.getUserIdForPlayer(playerSummary.player_id);
 
       if (!userId) {
@@ -145,13 +199,13 @@ export class GroupMeAgent extends BaseAgent {
         return {
           player_id: playerSummary.player_id,
           status: 'skipped',
-          reason: 'no_user_id'
+          reason: 'no_user_id',
+          hint: 'Player needs to link their GroupMe account'
         };
       }
 
       const messageText = this.formatPersonalMessage(playerSummary);
 
-      // Create direct message
       const response = await axios.post(
         `${this.apiBase}/direct_messages`,
         {
@@ -174,7 +228,8 @@ export class GroupMeAgent extends BaseAgent {
           player_id: playerSummary.player_id,
           message_id: response.data.message.id,
           status: 'delivered',
-          timestamp: new Date()
+          timestamp: new Date(),
+          preview: messageText.substring(0, 100) + '...'
         };
       }
 
@@ -189,47 +244,63 @@ export class GroupMeAgent extends BaseAgent {
   }
 
   /**
-   * Format personal message
+   * Format heroic personal message
    */
   formatPersonalMessage(playerSummary) {
-    let message = `🎲 Your D&D Session Summary\n\n`;
+    let message = `🗡️ YOUR PERSONAL SESSION RECAP 🛡️\n\n`;
+    
+    // Main narrative
     message += playerSummary.message_text + `\n\n`;
 
+    // Accomplishments with heroic flair
+    if (playerSummary.accomplishments?.length > 0) {
+      message += `⚔️ YOUR VALOROUS DEEDS:\n`;
+      playerSummary.accomplishments.forEach(deed => {
+        message += `  🏆 ${deed}\n`;
+      });
+      message += `\n`;
+    }
+
+    // Stat changes with growth emphasis
     if (playerSummary.stat_changes?.length > 0) {
-      message += `📊 Stat Changes:\n`;
+      message += `📊 CHARACTER GROWTH:\n`;
       playerSummary.stat_changes.forEach(change => {
-        message += `• ${change.stat}: ${change.change}\n`;
+        message += `  ⬆️ ${change.stat}: ${change.change}`;
+        if (change.description) {
+          message += ` (${change.description})`;
+        }
+        message += `\n`;
       });
       message += `\n`;
     }
 
+    // Loot with treasure emphasis
     if (playerSummary.loot?.length > 0) {
-      message += `🎒 Your Loot:\n`;
+      message += `💰 YOUR HARD-EARNED SPOILS:\n`;
       playerSummary.loot.forEach(item => {
-        message += `• ${item}\n`;
+        message += `  💎 ${item}\n`;
       });
       message += `\n`;
     }
 
+    // Special notes
     if (playerSummary.notes?.length > 0) {
-      message += `📝 Notes:\n`;
+      message += `📝 DEEDS OF NOTE:\n`;
       playerSummary.notes.forEach(note => {
-        message += `• ${note}\n`;
+        message += `  ⭐ ${note}\n`;
       });
+      message += `\n`;
     }
+
+    message += `🎲 May the dice favor you in sessions to come!`;
 
     return message;
   }
 
   /**
    * Get GroupMe user ID for a player
-   * This requires a mapping between app user IDs and GroupMe user IDs
    */
   async getUserIdForPlayer(playerId) {
-    // This would query your database for the mapping
-    // For now, return null (implementation needed)
-    // You'd store this mapping when users link their GroupMe account in the app
-
     const mapping = this.getContext('groupme-user-mappings') || {};
     return mapping[playerId] || null;
   }
@@ -243,11 +314,12 @@ export class GroupMeAgent extends BaseAgent {
     this.setContext('groupme-user-mappings', mappings);
 
     this.emit('playerLinked', { playerId, groupmeUserId });
+    this.log('info', `Linked player ${playerId} to GroupMe user ${groupmeUserId}`);
     return true;
   }
 
   /**
-   * Get group members (for linking UI)
+   * Get group members for linking UI
    */
   async getGroupMembers() {
     try {
@@ -263,7 +335,8 @@ export class GroupMeAgent extends BaseAgent {
       return response.data.response.members.map(member => ({
         id: member.user_id,
         name: member.name,
-        nickname: member.nickname
+        nickname: member.nickname,
+        avatar_url: member.image_url
       }));
 
     } catch (error) {
@@ -273,7 +346,7 @@ export class GroupMeAgent extends BaseAgent {
   }
 
   /**
-   * Test bot connection
+   * Test bot connection with epic greeting
    */
   async testBotConnection() {
     try {
@@ -281,7 +354,7 @@ export class GroupMeAgent extends BaseAgent {
         `${this.apiBase}/bots/post`,
         {
           bot_id: this.botId,
-          text: '🤖 D&D Session Manager is connected and ready!'
+          text: '🎲 Hark! The D&D Session Manager awakens! Greetings, brave adventurers! 🗡️'
         }
       );
 
@@ -290,5 +363,19 @@ export class GroupMeAgent extends BaseAgent {
       this.log('error', 'Bot connection test failed', error);
       return false;
     }
+  }
+
+  /**
+   * Preview message formatting (for approval screen)
+   */
+  previewGroupMessage(groupSummary) {
+    return this.formatGroupMessage(groupSummary, null);
+  }
+
+  /**
+   * Preview personal message formatting
+   */
+  previewPersonalMessage(playerSummary) {
+    return this.formatPersonalMessage(playerSummary);
   }
 }
