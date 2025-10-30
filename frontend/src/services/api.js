@@ -78,7 +78,26 @@ export const api = {
   
   // Health check
   healthCheck: () =>
-    apiClient.get('/health', { baseURL: 'http://localhost:3000' })
+    apiClient.get('/health', { baseURL: 'http://localhost:3000' }),
+
+  // Vector Search / RAG
+  queryWithRAG: (query, topK = 3, conversationHistory = []) =>
+    apiClient.post('/query', { query, topK, conversationHistory }),
+  
+  searchSessions: (query, topK = 5, filter = {}) =>
+    apiClient.post('/search/sessions', { query, topK, filter }),
+  
+  indexSession: (sessionId) =>
+    apiClient.post(`/sessions/${sessionId}/index`),
+  
+  batchIndexAllSessions: () =>
+    apiClient.post('/sessions/index/all'),
+  
+  getVectorStats: () =>
+    apiClient.get('/vector/stats'),
+  
+  deleteSessionIndex: (sessionId) =>
+    apiClient.delete(`/sessions/${sessionId}/index`)
 };
 
 export default api;

@@ -629,7 +629,187 @@ app.get('/api/stats', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// ===== VECTOR SEARCH / RAG ROUTES =====
 
+// Query sessions with natural language (RAG)
+app.post('/api/query', async (req, res) => {
+  try {
+    const { query, topK = 3, conversationHistory = [] } = req.body;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'Query text is required' });
+    }
+
+    const vectorAgent = orchestrator.getAgent('vector-search');
+    
+    if (!vectorAgent) {
+      return res.status(503).json({ 
+        error: 'Vector search is not configured. Please set PINECONE_API_KEY in environment.' 
+      });
+    }
+
+    console.log(`🔍 RAG Query: "${query}"`);
+
+    const result = await vectorAgent.execute({
+      operation: 'query',
+      query,
+      topK,
+      conversationHistory
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Query failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Search sessions by semantic similarity (no generation)
+app.post('/api/search/sessions', async (req, res) => {
+  try {
+    const { query, topK = 5, filter = {} } = req.body;
+
+    if (!query) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const vectorAgent = orchestrator.getAgent('vector-search');
+    
+    if (!vectorAgent) {
+      return res.status(503).json({ 
+        error: 'Vector search not configured' 
+      });
+    }
+
+    const result = await vectorAgent.execute({
+      operation: 'search',
+      query,
+      topK,
+      filter
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Search failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Index a specific session manually
+app.post('/api/sessions/:sessionId/index', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const vectorAgent = orchestrator.getAgent('vector-search');
+    const stateManager = orchestrator.getAgent('state-manager');
+
+    if (!vectorAgent) {
+      return res.status(503).json({ error: 'Vector search not configured' });
+    }
+
+    // Get session with summaries
+    const session = await stateManager.getSession(sessionId);
+
+    if (!session.summaries) {
+      return res.status(400).json({ 
+        error: 'Session has no summaries. End the session first to generate summaries.' 
+      });
+    }
+
+    // Index the session
+    const result = await vectorAgent.execute({
+      operation: 'index-session',
+      sessionId: session.id,
+      summary: session.summaries,
+      metadata: {
+        date: session.start_ts,
+        players: session.metadata?.players || [],
+        eventCount: session.event_list?.length || 0
+      }
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Indexing failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Batch index all completed sessions
+app.post('/api/sessions/index/all', async (req, res) => {
+  try {
+    const vectorAgent = orchestrator.getAgent('vector-search');
+    const stateManager = orchestrator.getAgent('state-manager');
+
+    if (!vectorAgent) {
+      return res.status(503).json({ error: 'Vector search not configured' });
+    }
+
+    // Get all completed sessions with summaries
+    const sessions = await stateManager.Session.find({
+      status: 'completed',
+      summaries: { $exists: true, $ne: null }
+    }).limit(100);
+
+    console.log(`📚 Batch indexing ${sessions.length} sessions...`);
+
+    const sessionsToIndex = sessions.map(session => ({
+      sessionId: session.id,
+      summary: session.summaries,
+      metadata: {
+        date: session.start_ts,
+        players: session.metadata?.players || [],
+        eventCount: session.event_list?.length || 0
+      }
+    }));
+
+    const result = await vectorAgent.batchIndexSessions(sessionsToIndex);
+
+    res.json(result);
+  } catch (error) {
+    console.error('Batch indexing failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get vector database stats
+app.get('/api/vector/stats', async (req, res) => {
+  try {
+    const vectorAgent = orchestrator.getAgent('vector-search');
+
+    if (!vectorAgent) {
+      return res.status(503).json({ error: 'Vector search not configured' });
+    }
+
+    const stats = await vectorAgent.getStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Failed to get stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete session from vector database
+app.delete('/api/sessions/:sessionId/index', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const vectorAgent = orchestrator.getAgent('vector-search');
+
+    if (!vectorAgent) {
+      return res.status(503).json({ error: 'Vector search not configured' });
+    }
+
+    const result = await vectorAgent.execute({
+      operation: 'delete-session',
+      sessionId
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Delete failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // ===== SERVE REACT APP IN PRODUCTION =====
 
 if (process.env.NODE_ENV === 'production') {
