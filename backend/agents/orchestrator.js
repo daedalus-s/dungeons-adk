@@ -4,6 +4,7 @@ import { EventExtractionAgent } from './event-extraction-agent.js';
 import { SummarizerAgent } from './summarizer-agent.js';
 import { GoogleSheetsAgent } from './sheets-agent.js';
 import { TranscriptionAgent } from './transcription-agent.js';
+import { VectorSearchAgent } from './vector-search-agent.js';
 
 /**
  * AgentOrchestrator - Central coordinator for multi-agent workflows
@@ -30,7 +31,7 @@ export class AgentOrchestrator extends EventEmitter {
       namespace: config.namespace || process.env.PINECONE_NAMESPACE || 'default'
     };
 
-    // Initialize agents
+    // Initialize core agents
     this.agents.set('state-manager', new StateManagerAgent(agentConfig));
     this.agents.set('event-extraction', new EventExtractionAgent(agentConfig));
     this.agents.set('summarizer', new SummarizerAgent(agentConfig));
@@ -41,6 +42,18 @@ export class AgentOrchestrator extends EventEmitter {
       this.agents.set('sheets', new GoogleSheetsAgent(agentConfig));
     }
 
+    // Only initialize vector search agent if Pinecone credentials are available
+    if (agentConfig.pineconeApiKey) {
+      try {
+        this.agents.set('vector-search', new VectorSearchAgent(agentConfig));
+        console.log('✅ Vector Search Agent initialized');
+      } catch (error) {
+        console.error('❌ Vector Search Agent failed to initialize:', error.message);
+      }
+    } else {
+      console.log('⚠️  Vector Search Agent skipped (no Pinecone API key)');
+    }
+
     // Set up event listeners
     this.agents.forEach((agent, name) => {
       agent.on('log', (log) => this.emit('agentLog', { agent: name, ...log }));
@@ -48,7 +61,7 @@ export class AgentOrchestrator extends EventEmitter {
       agent.on('stateChange', (state) => this.emit('agentStateChange', { agent: name, ...state }));
     });
 
-    console.log(`âœ… Orchestrator: Initialized ${this.agents.size} agents`);
+    console.log(`✅ Orchestrator: Initialized ${this.agents.size} agents`);
   }
 
   /**
@@ -75,79 +88,79 @@ export class AgentOrchestrator extends EventEmitter {
   /**
    * Simple session processing workflow
    */
-async processSessionEnd(sessionId, transcript, players) {
-  console.log(`\n📊 Processing session: ${sessionId}\n`);
+  async processSessionEnd(sessionId, transcript, players) {
+    console.log(`\n📊 Processing session: ${sessionId}\n`);
 
-  // Step 1: Extract events
-  console.log('Step 1: Extracting events...');
-  const eventData = await this.executeAgent('event-extraction', {
-    transcript,
-    sessionId,
-    chunkIndex: 0
-  });
-  console.log(`✅ Extracted ${eventData.events.length} events`);
+    // Step 1: Extract events
+    console.log('Step 1: Extracting events...');
+    const eventData = await this.executeAgent('event-extraction', {
+      transcript,
+      sessionId,
+      chunkIndex: 0
+    });
+    console.log(`✅ Extracted ${eventData.events.length} events`);
 
-  // Step 2: Generate summaries
-  console.log('\nStep 2: Generating summaries...');
-  const summaries = await this.executeAgent('summarizer', {
-    sessionId,
-    events: eventData.events,
-    players
-  });
-  console.log('✅ Summaries generated');
+    // Step 2: Generate summaries
+    console.log('\nStep 2: Generating summaries...');
+    const summaries = await this.executeAgent('summarizer', {
+      sessionId,
+      events: eventData.events,
+      players
+    });
+    console.log('✅ Summaries generated');
 
-  // Step 3: Save to database
-  console.log('\nStep 3: Saving to database...');
-  const stateManager = this.getAgent('state-manager');
-  await stateManager.updateSession(sessionId, {
-    event_list: eventData.events,
-    summaries: summaries,
-    status: 'completed',
-    end_ts: new Date()
-  });
-  console.log('✅ Session updated');
+    // Step 3: Save to database
+    console.log('\nStep 3: Saving to database...');
+    const stateManager = this.getAgent('state-manager');
+    await stateManager.updateSession(sessionId, {
+      event_list: eventData.events,
+      summaries: summaries,
+      status: 'completed',
+      end_ts: new Date()
+    });
+    console.log('✅ Session updated');
 
-  // Step 4: Create write request for sheets (if sheets agent exists)
-  const sheetsAgent = this.getAgent('sheets');
-  if (sheetsAgent && summaries.sheetsData) {
-    console.log('\nStep 4: Creating write request...');
-    const writeRequest = await sheetsAgent.createWriteRequest(
-      summaries.sheetsData.sheetName,
-      summaries.sheetsData,
-      sessionId
-    );
-    await stateManager.saveWriteRequest(writeRequest);
-    console.log('✅ Write request created (pending approval)');
-  }
-
-  // Step 5: Index session in vector database (if vector agent exists)
-  const vectorAgent = this.getAgent('vector-search');
-  if (vectorAgent) {
-    console.log('\nStep 5: Indexing session in vector database...');
-    try {
-      const session = await stateManager.getSession(sessionId);
-      await vectorAgent.execute({
-        operation: 'index-session',
-        sessionId: session.id,
-        summary: summaries,
-        metadata: {
-          date: session.start_ts,
-          players: session.metadata?.players || [],
-          eventCount: eventData.events.length
-        }
-      });
-      console.log('✅ Session indexed for semantic search');
-    } catch (error) {
-      console.log('⚠️  Failed to index session:', error.message);
+    // Step 4: Create write request for sheets (if sheets agent exists)
+    const sheetsAgent = this.getAgent('sheets');
+    if (sheetsAgent && summaries.sheetsData) {
+      console.log('\nStep 4: Creating write request...');
+      const writeRequest = await sheetsAgent.createWriteRequest(
+        summaries.sheetsData.sheetName,
+        summaries.sheetsData,
+        sessionId
+      );
+      await stateManager.saveWriteRequest(writeRequest);
+      console.log('✅ Write request created (pending approval)');
     }
-  }
 
-  return {
-    sessionId,
-    events: eventData.events,
-    summaries
-  };
-}
+    // Step 5: Index session in vector database (if vector agent exists)
+    const vectorAgent = this.getAgent('vector-search');
+    if (vectorAgent) {
+      console.log('\nStep 5: Indexing session in vector database...');
+      try {
+        const session = await stateManager.getSession(sessionId);
+        await vectorAgent.execute({
+          operation: 'index-session',
+          sessionId: session.id,
+          summary: summaries,
+          metadata: {
+            date: session.start_ts,
+            players: session.metadata?.players || [],
+            eventCount: eventData.events.length
+          }
+        });
+        console.log('✅ Session indexed for semantic search');
+      } catch (error) {
+        console.log('⚠️  Failed to index session:', error.message);
+      }
+    }
+
+    return {
+      sessionId,
+      events: eventData.events,
+      summaries
+    };
+  }
 
   /**
    * Health check for all agents

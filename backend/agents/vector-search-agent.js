@@ -326,7 +326,7 @@ Return ONLY a JSON array of concept strings: ["concept1", "concept2", ...]`;
   /**
    * Generate answer using Claude with retrieved context
    */
-  async generateAnswerWithContext(query, context, conversationHistory) {
+async generateAnswerWithContext(query, context, conversationHistory) {
     const systemPrompt = `You are an AI assistant helping Dungeon Masters and players recall details from their D&D campaign sessions. You have access to session summaries from their past games.
 
 Your role:
@@ -345,10 +345,23 @@ ${context}
 
 Please provide a clear, engaging answer based on the information above. Reference specific sessions when mentioning events.`;
 
-    const messages = [
-      ...conversationHistory,
-      { role: 'user', content: userPrompt }
-    ];
+    // Build messages array, ensuring all messages have valid content
+    const messages = [];
+    
+    // Add conversation history (filter out any invalid messages)
+    if (conversationHistory && Array.isArray(conversationHistory)) {
+      conversationHistory.forEach(msg => {
+        if (msg.role && msg.content && typeof msg.content === 'string' && msg.content.trim()) {
+          messages.push({
+            role: msg.role,
+            content: msg.content
+          });
+        }
+      });
+    }
+    
+    // Add current query
+    messages.push({ role: 'user', content: userPrompt });
 
     const response = await this.callClaude(messages, {
       max_tokens: 2000,
