@@ -37,15 +37,37 @@ export default function QueryInterface() {
       setLoading(true);
       setError(null);
 
+      console.log('🔍 Submitting query:', query);
+      console.log('📚 Conversation history length:', conversationHistory.length);
+
       const response = await api.queryWithRAG(query, 3, conversationHistory);
 
-      setResult(response);
+      console.log('✅ Response received:', response);
+
+      // Check if response has data
+      if (!response || !response.data) {
+        throw new Error('No response data received');
+      }
+
+      const data = response.data;
+
+      // Validate response structure
+      if (!data.answer) {
+        console.warn('⚠️  Response missing answer field:', data);
+        throw new Error('Invalid response format: missing answer');
+      }
+
+      console.log('📊 Answer:', data.answer);
+      console.log('📊 Sources:', data.sources?.length || 0);
+      console.log('📊 Confidence:', data.confidence);
+
+      setResult(data);
       
       // Update conversation history
       setConversationHistory(prev => [
         ...prev,
         { role: 'user', content: query },
-        { role: 'assistant', content: response.answer }
+        { role: 'assistant', content: data.answer }
       ]);
 
       // Keep only last 5 exchanges to manage token usage
@@ -54,8 +76,23 @@ export default function QueryInterface() {
       }
 
     } catch (err) {
-      console.error('Query failed:', err);
-      setError(err.message || 'Failed to process query');
+      console.error('❌ Query failed:', err);
+      console.error('Error details:', {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status
+      });
+      
+      let errorMessage = 'Failed to process query';
+      if (err.response?.status === 503) {
+        errorMessage = 'Vector search is not configured. Please set up Pinecone in your environment.';
+      } else if (err.response?.data?.error) {
+        errorMessage = err.response.data.error;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -184,7 +221,7 @@ export default function QueryInterface() {
       )}
 
       {/* Results Display */}
-      {result && (
+      {result && result.answer && (
         <Card elevation={3}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
@@ -209,18 +246,20 @@ export default function QueryInterface() {
             </Paper>
 
             {/* Confidence Score */}
-            <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <Chip
-                label={`Confidence: ${(result.confidence * 100).toFixed(1)}%`}
-                color={result.confidence > 0.7 ? 'success' : result.confidence > 0.5 ? 'warning' : 'default'}
-                size="small"
-              />
-              <Chip
-                label={`${result.sources?.length || 0} relevant sessions`}
-                size="small"
-                variant="outlined"
-              />
-            </Stack>
+            {result.confidence !== null && result.confidence !== undefined && !isNaN(result.confidence) && (
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+                <Chip
+                  label={`Confidence: ${(result.confidence * 100).toFixed(1)}%`}
+                  color={result.confidence > 0.7 ? 'success' : result.confidence > 0.5 ? 'warning' : 'default'}
+                  size="small"
+                />
+                <Chip
+                  label={`${result.sources?.length || 0} relevant sessions`}
+                  size="small"
+                  variant="outlined"
+                />
+              </Stack>
+            )}
 
             <Divider sx={{ my: 2 }} />
 
@@ -237,7 +276,7 @@ export default function QueryInterface() {
                       <AccordionSummary expandIcon={<ExpandMore />}>
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
                           <Typography variant="body2" sx={{ flex: 1 }}>
-                            Session {source.sessionId.slice(-8)} - {new Date(source.date).toLocaleDateString()}
+                            Session {source.sessionId?.slice(-8) || 'Unknown'} - {source.date ? new Date(source.date).toLocaleDateString() : 'No date'}
                           </Typography>
                           <Chip
                             label={`${(source.score * 100).toFixed(0)}% match`}
@@ -252,7 +291,7 @@ export default function QueryInterface() {
                             Summary
                           </Typography>
                           <Typography variant="body2" paragraph>
-                            {source.tldr}
+                            {source.tldr || 'No summary available'}
                           </Typography>
 
                           {source.relevantEvents && source.relevantEvents.length > 0 && (
