@@ -1,19 +1,24 @@
+// frontend/src/components/SessionRecorder-with-player-selection.jsx
+// Updated SessionRecorder with player selection
 import { useState, useEffect } from 'react';
 import {
   Box, Button, Card, CardContent, Typography, Chip, 
-  LinearProgress, Alert, Stack, Paper, Divider
+  LinearProgress, Alert, Stack, Paper, Divider, Dialog,
+  DialogTitle, DialogContent, DialogActions, FormControl,
+  FormLabel, FormGroup, FormControlLabel, Checkbox
 } from '@mui/material';
 import { 
-  Mic, Stop, CloudUpload, CheckCircle, Error as ErrorIcon 
+  Mic, Stop, CloudUpload, CheckCircle, Error as ErrorIcon, People 
 } from '@mui/icons-material';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useSessionStore } from '../store/sessionStore';
+import { useAuth } from '../contexts/AuthContext';
 import { api } from '../services/api';
 
 export default function SessionRecorder() {
+  const { user, isAdmin } = useAuth();
   const { 
     isRecording, 
-    isPaused, 
     duration, 
     startRecording, 
     stopRecording,
@@ -33,6 +38,41 @@ export default function SessionRecorder() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
   const [chunkCount, setChunkCount] = useState(0);
+  
+  // Player selection state
+  const [showPlayerDialog, setShowPlayerDialog] = useState(false);
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [loadingPlayers, setLoadingPlayers] = useState(false);
+
+  useEffect(() => {
+    loadPlayers();
+  }, []);
+
+  const loadPlayers = async () => {
+    try {
+      setLoadingPlayers(true);
+      const response = await api.getAllPlayers();
+      setAllPlayers(response.data);
+      
+      // Auto-select current user's player if they have one
+      if (user.player_id) {
+        setSelectedPlayers([user.player_id]);
+      }
+    } catch (error) {
+      console.error('Failed to load players:', error);
+    } finally {
+      setLoadingPlayers(false);
+    }
+  };
+
+  const handlePlayerToggle = (playerId) => {
+    setSelectedPlayers(prev => 
+      prev.includes(playerId)
+        ? prev.filter(id => id !== playerId)
+        : [...prev, playerId]
+    );
+  };
 
   const formatDuration = (seconds) => {
     const hrs = Math.floor(seconds / 3600);
@@ -42,20 +82,38 @@ export default function SessionRecorder() {
   };
 
   const handleStartSession = async () => {
+    // Non-admin users must include themselves
+    if (!isAdmin() && !selectedPlayers.includes(user.player_id)) {
+      setUploadStatus({ 
+        type: 'error', 
+        message: 'You must be a participant in the session' 
+      });
+      return;
+    }
+
+    if (selectedPlayers.length === 0) {
+      setUploadStatus({ 
+        type: 'error', 
+        message: 'Please select at least one player' 
+      });
+      return;
+    }
+
     try {
       // Create session on backend
-      const response = await api.createSession(['player_test'], 'dm_1');
+      const response = await api.createSession(selectedPlayers);
       setSession(response.data.sessionId);
       
       // Start recording
       await startRecording();
       
+      setShowPlayerDialog(false);
       setUploadStatus({ type: 'success', message: 'Session started! Recording audio...' });
     } catch (error) {
       console.error('Failed to start session:', error);
       setUploadStatus({ 
         type: 'error', 
-        message: error.message || 'Failed to start session' 
+        message: error.response?.data?.error || 'Failed to start session' 
       });
     }
   };
@@ -136,6 +194,7 @@ export default function SessionRecorder() {
         clearSession();
         setChunkCount(0);
         setUploadStatus(null);
+        setSelectedPlayers(user.player_id ? [user.player_id] : []);
       }, 3000);
 
     } catch (error) {
@@ -147,6 +206,13 @@ export default function SessionRecorder() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const getSelectedPlayerNames = () => {
+    return allPlayers
+      .filter(p => selectedPlayers.includes(p.id))
+      .map(p => p.in_game_name)
+      .join(', ');
   };
 
   return (
@@ -181,23 +247,31 @@ export default function SessionRecorder() {
 
             {/* Recording Controls */}
             {!isRecording ? (
-              <Button
-                variant="contained"
-                size="large"
-                startIcon={<Mic />}
-                onClick={handleStartSession}
-                disabled={isProcessing}
-                sx={{
-                  py: 2,
-                  fontSize: '1.1rem',
-                  background: 'linear-gradient(45deg, #6200ee 30%, #9c27b0 90%)',
-                  '&:hover': {
-                    background: 'linear-gradient(45deg, #4e00b3 30%, #7b1fa2 90%)',
-                  }
-                }}
-              >
-                Start Recording Session
-              </Button>
+              <Box>
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<People />}
+                  onClick={() => setShowPlayerDialog(true)}
+                  disabled={isProcessing}
+                  sx={{
+                    py: 2,
+                    fontSize: '1.1rem',
+                    background: 'linear-gradient(45deg, #6200ee 30%, #9c27b0 90%)',
+                    '&:hover': {
+                      background: 'linear-gradient(45deg, #4e00b3 30%, #7b1fa2 90%)',
+                    }
+                  }}
+                >
+                  Start Recording Session
+                </Button>
+
+                {selectedPlayers.length > 0 && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+                    Selected players: {getSelectedPlayerNames()}
+                  </Typography>
+                )}
+              </Box>
             ) : (
               <Stack direction="row" spacing={2}>
                 <Button
@@ -250,6 +324,9 @@ export default function SessionRecorder() {
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       ⚔️ Events detected: {events.length}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      👥 Players: {getSelectedPlayerNames()}
                     </Typography>
                   </Box>
                 </Stack>
@@ -324,6 +401,68 @@ export default function SessionRecorder() {
         </CardContent>
       </Card>
 
+      {/* Player Selection Dialog */}
+      <Dialog open={showPlayerDialog} onClose={() => setShowPlayerDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <People />
+            <Typography variant="h6">Select Players for Session</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {isAdmin() 
+              ? 'Select the players participating in this session'
+              : 'You must be included in the session. Select other participants:'
+            }
+          </Typography>
+
+          {loadingPlayers ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <FormControl component="fieldset">
+              <FormGroup>
+                {allPlayers.map(player => (
+                  <FormControlLabel
+                    key={player.id}
+                    control={
+                      <Checkbox
+                        checked={selectedPlayers.includes(player.id)}
+                        onChange={() => handlePlayerToggle(player.id)}
+                        disabled={!isAdmin() && player.id === user.player_id} // Non-admin must include themselves
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body1">
+                          {player.in_game_name}
+                          {player.id === user.player_id && ' (You)'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {player.real_name} - {player.race} {player.role_type} (Lvl {player.level})
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                ))}
+              </FormGroup>
+            </FormControl>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowPlayerDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={handleStartSession}
+            variant="contained"
+            disabled={selectedPlayers.length === 0}
+          >
+            Start Session ({selectedPlayers.length} player{selectedPlayers.length !== 1 ? 's' : ''})
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Instructions */}
       {!isRecording && !sessionId && (
         <Card sx={{ mt: 3 }} elevation={1}>
@@ -333,16 +472,19 @@ export default function SessionRecorder() {
             </Typography>
             <Stack spacing={1}>
               <Typography variant="body2">
-                <strong>1.</strong> Click "Start Recording Session" and allow microphone access
+                <strong>1.</strong> Click "Start Recording Session" and select participants
               </Typography>
               <Typography variant="body2">
-                <strong>2.</strong> Play your D&D game normally - speak clearly for best results
+                <strong>2.</strong> Allow microphone access when prompted
               </Typography>
               <Typography variant="body2">
-                <strong>3.</strong> Click "Process Chunk" every 30-60 seconds to transcribe and extract events
+                <strong>3.</strong> Play your D&D game normally - speak clearly for best results
               </Typography>
               <Typography variant="body2">
-                <strong>4.</strong> Click "End Session" when finished - summaries will be generated
+                <strong>4.</strong> Click "Process Chunk" every 30-60 seconds to transcribe and extract events
+              </Typography>
+              <Typography variant="body2">
+                <strong>5.</strong> Click "End Session" when finished - summaries will be generated
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                 💡 <strong>Tip:</strong> For best transcription, use a good microphone and minimize background noise

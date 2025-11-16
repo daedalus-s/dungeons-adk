@@ -7,6 +7,10 @@ import { fileURLToPath } from 'url';
 import { AgentOrchestrator } from './agents/orchestrator.js';
 import { GroupMeAgent } from './agents/groupme-agent.js';
 import { config } from '../config.js';
+import session from 'express-session';
+import MongoStore from 'connect-mongo';
+import { requireAuth, requireAdmin, optionalAuth } from './middleware/auth.js';
+import { setupAuthRoutes } from './auth/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,7 +22,22 @@ const PORT = config.port || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dungeons-adk-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: config.mongodbUri,
+    touchAfter: 24 * 3600
+  }),
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
+  }
+}));
 // Serve uploaded audio files
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
@@ -43,6 +62,27 @@ const orchestrator = new AgentOrchestrator({
   googleCredentials: config.googleApplicationCredentials,
   sheetsId: config.googleSheetsId
 });
+
+// Setup authentication routes
+const stateManager = orchestrator.getAgent('state-manager');
+
+// Add User schema to state manager
+if (!stateManager.User) {
+  const mongoose = await import('mongoose');
+  const userSchema = new mongoose.default.Schema({
+    id: { type: String, required: true, unique: true },
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    player_id: { type: String },
+    created_at: Date,
+    last_login: Date
+  }, { timestamps: true });
+  
+  stateManager.User = mongoose.default.models.User || mongoose.default.model('User', userSchema);
+}
+
+setupAuthRoutes(app, stateManager);
 
 // Initialize GroupMe agent
 const groupmeAgent = new GroupMeAgent({
@@ -114,10 +154,17 @@ app.get('/api/agents/health', async (req, res) => {
 // ===== SESSION ROUTES =====
 
 // Create new session
-app.post('/api/sessions', async (req, res) => {
+app.post('/api/sessions', requireAuth, async (req, res) => {
   try {
-    const { players, dm_id } = req.body;
+    const { player_ids } = req.body;
     const sessionId = `session_${Date.now()}`;
+
+    // Verify user has access
+    if (req.user.role !== 'admin') {
+      if (!req.user.player_id || !player_ids.includes(req.user.player_id)) {
+        return res.status(403).json({ error: 'You must be a participant to create this session' });
+      }
+    }
 
     const stateManager = orchestrator.getAgent('state-manager');
     const session = await stateManager.saveSession({
@@ -129,7 +176,11 @@ app.post('/api/sessions', async (req, res) => {
       event_list: [],
       per_player_events: {},
       summary_sent: false,
-      metadata: { dm_id, players }
+      metadata: { 
+        dm_id: req.user.id,
+        created_by: req.user.username, 
+        player_ids: player_ids
+      }
     });
 
     broadcast({ type: 'session:created', data: { sessionId } });
@@ -319,6 +370,28 @@ app.post('/api/sessions/:sessionId/end', async (req, res) => {
       }
     }
 
+    const vectorAgent = orchestrator.getAgent('vector-search');
+    if (vectorAgent) {
+      try {
+        const session = await stateManager.getSession(sessionId);
+        await vectorAgent.execute({
+          operation: 'index-session',
+          sessionId: session.id,
+          summary: summaries,
+          metadata: {
+            date: session.start_ts,
+            players: session.metadata?.player_ids || [],
+            eventCount: eventData.events.length,
+            username: req.user.username, // Add username for filtering
+            created_by: req.user.username
+          }
+        });
+        console.log('✅ Session indexed for semantic search');
+      } catch (error) {
+        console.log('⚠️  Failed to index session:', error.message);
+      }
+    }
+
     broadcast({ type: 'session:completed', data: { sessionId } });
 
     res.json({
@@ -375,10 +448,16 @@ app.get('/api/sessions/:sessionId/details', async (req, res) => {
 });
 
 // Get all sessions
-app.get('/api/sessions', async (req, res) => {
+app.get('/api/sessions', requireAuth, async (req, res) => {
   try {
     const stateManager = orchestrator.getAgent('state-manager');
-    const sessions = await stateManager.Session.find()
+    
+    let query = {};
+    if (req.user.role !== 'admin') {
+      query = { 'metadata.player_ids': req.user.player_id };
+    }
+    
+    const sessions = await stateManager.Session.find(query)
       .sort({ start_ts: -1 })
       .limit(50);
     
@@ -397,7 +476,7 @@ app.get('/api/sessions', async (req, res) => {
 
 // ===== PLAYER ROUTES =====
 
-app.post('/api/players', async (req, res) => {
+app.post('/api/players', requireAdmin, async (req, res) => {
   try {
     const playerData = {
       id: `player_${Date.now()}`,
@@ -454,7 +533,7 @@ app.get('/api/players', async (req, res) => {
 
 // ===== APPROVAL ROUTES WITH GROUPME =====
 
-app.get('/api/approvals/pending', async (req, res) => {
+app.get('/api/approvals/pending', requireAdmin, async (req, res) => {
   try {
     const stateManager = orchestrator.getAgent('state-manager');
     const pending = await stateManager.getPendingWriteRequests();
@@ -632,7 +711,7 @@ app.get('/api/stats', async (req, res) => {
 // ===== VECTOR SEARCH / RAG ROUTES =====
 
 // Query sessions with natural language (RAG)
-app.post('/api/query', async (req, res) => {
+app.post('/api/query', requireAuth, async (req, res) => {
   try {
     const { query, topK = 3, conversationHistory = [] } = req.body;
 
@@ -644,17 +723,21 @@ app.post('/api/query', async (req, res) => {
     
     if (!vectorAgent) {
       return res.status(503).json({ 
-        error: 'Vector search is not configured. Please set PINECONE_API_KEY in environment.' 
+        error: 'Vector search is not configured.' 
       });
     }
 
-    console.log(`🔍 RAG Query: "${query}"`);
+    // Filter by username for non-admin users
+    const filter = req.user.role !== 'admin' 
+      ? { username: req.user.username }
+      : {};
 
     const result = await vectorAgent.execute({
       operation: 'query',
       query,
       topK,
-      conversationHistory
+      conversationHistory,
+      filter
     });
 
     res.json(result);

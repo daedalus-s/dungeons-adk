@@ -6,6 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 60000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -97,7 +98,26 @@ export const api = {
     apiClient.get('/vector/stats'),
   
   deleteSessionIndex: (sessionId) =>
-    apiClient.delete(`/sessions/${sessionId}/index`)
+    apiClient.delete(`/sessions/${sessionId}/index`),
+
+  login: (username, password) =>
+    apiClient.post('/auth/login', { username, password }),
+
+  logout: () =>
+    apiClient.post('/auth/logout'),
+
+  register: (username, password, role = 'user', player_id = null) =>
+    apiClient.post('/auth/register', { username, password, role, player_id }),
+
+  checkAuth: () =>
+    apiClient.get('/auth/me'),
+
+  getAllUsers: () =>
+    apiClient.get('/auth/users'),
+
+  // Update createSession
+  createSession: (player_ids) => 
+    apiClient.post('/sessions', { player_ids })
 };
 
 export default api;

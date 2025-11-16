@@ -221,89 +221,87 @@ Return ONLY a JSON array of concept strings: ["concept1", "concept2", ...]`;
    * Search sessions by semantic similarity
    */
   async searchSessions(params) {
-    const { query, topK = 5, filter = {} } = params;
+  const { query, topK = 5, filter = {} } = params;
 
-    this.log('info', `Searching for: "${query}"`);
+  this.log('info', `Searching for: "${query}"`);
 
-    try {
-      // Generate query embedding
-      const queryEmbedding = await this.generateEmbedding(query);
+  try {
+    const queryEmbedding = await this.generateEmbedding(query);
 
-      // Search Pinecone
-      const searchResults = await this.index.namespace(this.namespace).query({
-        vector: queryEmbedding,
-        topK,
-        includeMetadata: true,
-        filter: Object.keys(filter).length > 0 ? filter : undefined
-      });
-
-      const results = searchResults.matches.map(match => ({
-        sessionId: match.id,
-        score: match.score,
-        metadata: match.metadata
-      }));
-
-      this.log('info', `Found ${results.length} relevant sessions`);
-
-      return {
-        query,
-        results,
-        count: results.length
-      };
-
-    } catch (error) {
-      this.log('error', 'Search failed', error);
-      throw error;
+    // Build Pinecone filter
+    let pineconeFilter = undefined;
+    if (Object.keys(filter).length > 0) {
+      pineconeFilter = filter;
     }
+
+    const searchResults = await this.index.namespace(this.namespace).query({
+      vector: queryEmbedding,
+      topK,
+      includeMetadata: true,
+      filter: pineconeFilter // Pass filter to Pinecone
+    });
+
+    const results = searchResults.matches.map(match => ({
+      sessionId: match.id,
+      score: match.score,
+      metadata: match.metadata
+    }));
+
+    this.log('info', `Found ${results.length} relevant sessions`);
+
+    return {
+      query,
+      results,
+      count: results.length
+    };
+  } catch (error) {
+    this.log('error', 'Search failed', error);
+    throw error;
   }
+}
 
   /**
    * Query with RAG (Retrieval-Augmented Generation)
    */
   async queryWithRAG(params) {
-    const { query, topK = 3, conversationHistory = [] } = params;
+  const { query, topK = 3, conversationHistory = [], filter = {} } = params;
 
-    this.log('info', `RAG query: "${query}"`);
+  this.log('info', `RAG query: "${query}"`);
 
-    try {
-      // Step 1: Search for relevant sessions
-      const searchResults = await this.searchSessions({ query, topK });
+  try {
+    // Pass filter through
+    const searchResults = await this.searchSessions({ query, topK, filter });
 
-      if (searchResults.results.length === 0) {
-        return {
-          query,
-          answer: "I couldn't find any relevant sessions in the history. Try asking about specific events, characters, or items from your campaigns.",
-          sources: [],
-          confidence: 0
-        };
-      }
-
-      // Step 2: Build context from retrieved sessions
-      const context = this.buildContextFromResults(searchResults.results);
-
-      // Step 3: Generate answer with Claude using RAG
-      const answer = await this.generateAnswerWithContext(query, context, conversationHistory);
-
-      // Step 4: Return response with sources
+    if (searchResults.results.length === 0) {
       return {
         query,
-        answer: answer.text,
-        sources: searchResults.results.map(r => ({
-          sessionId: r.sessionId,
-          score: r.score,
-          date: r.metadata.date,
-          tldr: r.metadata.tldr,
-          relevantEvents: this.extractRelevantEvents(r.metadata, query)
-        })),
-        confidence: searchResults.results[0]?.score || 0,
-        retrievalCount: searchResults.results.length
+        answer: "I couldn't find any relevant sessions in your history.",
+        sources: [],
+        confidence: 0
       };
-
-    } catch (error) {
-      this.log('error', 'RAG query failed', error);
-      throw error;
     }
+
+    const context = this.buildContextFromResults(searchResults.results);
+    const answer = await this.generateAnswerWithContext(query, context, conversationHistory);
+
+    return {
+      query,
+      answer: answer.text,
+      sources: searchResults.results.map(r => ({
+        sessionId: r.sessionId,
+        score: r.score,
+        date: r.metadata.date,
+        tldr: r.metadata.tldr,
+        relevantEvents: this.extractRelevantEvents(r.metadata, query)
+      })),
+      confidence: searchResults.results[0]?.score || 0,
+      retrievalCount: searchResults.results.length
+    };
+  } catch (error) {
+    this.log('error', 'RAG query failed', error);
+    throw error;
   }
+}
 
   /**
    * Build context string from search results

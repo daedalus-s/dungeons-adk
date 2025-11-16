@@ -40,6 +40,7 @@ export class StateManagerAgent extends BaseAgent {
       this.Session = mongoose.models.Session;
       this.Player = mongoose.models.Player;
       this.WriteRequest = mongoose.models.WriteRequest;
+    this.User = mongoose.models.User;
       return;
     }
 
@@ -88,10 +89,21 @@ export class StateManagerAgent extends BaseAgent {
       rejection_reason: String
     }, { timestamps: true });
 
+    const userSchema = new mongoose.Schema({
+      id: { type: String, required: true, unique: true },
+      username: { type: String, required: true, unique: true },
+      password: { type: String, required: true },
+      role: { type: String, enum: ['user', 'admin'], default: 'user' },
+      player_id: { type: String },
+      created_at: Date,
+      last_login: Date
+    }, { timestamps: true });
+
     // Create models
     this.Session = mongoose.model('Session', sessionSchema);
     this.Player = mongoose.model('Player', playerSchema);
     this.WriteRequest = mongoose.model('WriteRequest', writeRequestSchema);
+    this.User = mongoose.model('User', userSchema);
   }
 
   /**
